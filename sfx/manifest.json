@@ -1,0 +1,74 @@
+[
+  {
+    "name": "ui-ack",
+    "seconds": 1,
+    "prompt": "A single soft UI button click: short muted plastic tap with a gentle high tick, dry, no reverb, quiet and confirmatory.",
+    "event": "ack"
+  },
+  {
+    "name": "ui-reject",
+    "seconds": 1,
+    "prompt": "A dull error thunk: low muted wooden knock followed by a short soft buzz, conveying refusal, dry, not harsh.",
+    "event": "reject"
+  },
+  {
+    "name": "footstep",
+    "seconds": 1,
+    "prompt": "A single soft footstep on stone floor inside a quiet hall: low heel thud with slight room ambience, dry and close.",
+    "event": "move"
+  },
+  {
+    "name": "footstep-alt",
+    "seconds": 1,
+    "prompt": "A single soft footstep on stone floor, alternate take: slightly lighter toe-first step with faint grit, quiet room tone.",
+    "event": "move"
+  },
+  {
+    "name": "task-complete",
+    "seconds": 2,
+    "prompt": "A small mechanical task success: a precise metal latch clicking shut followed by a brief warm wooden tick, satisfying and compact.",
+    "event": "task"
+  },
+  {
+    "name": "council-bell",
+    "seconds": 2,
+    "prompt": "A small brass hand bell rung twice to call a council to order: clear metallic ding with short natural decay in a wood room.",
+    "event": "meeting"
+  },
+  {
+    "name": "eject-whoosh",
+    "seconds": 2,
+    "prompt": "A heavy sliding door whoosh followed by a fading air rush, as someone is cast out of a chamber: deep airy sweep, no music.",
+    "event": "eject"
+  },
+  {
+    "name": "eliminate-thud",
+    "seconds": 2,
+    "prompt": "A sudden heavy body thud on a wooden floor with a low muffled rumble, ominous and brief, no scream, no music.",
+    "event": "eliminate"
+  },
+  {
+    "name": "victory-fanfare",
+    "seconds": 3,
+    "prompt": "A short triumphant brass fanfare: three rising trumpet notes ending on a bright held chord, small ensemble, ceremonial.",
+    "event": "win"
+  },
+  {
+    "name": "defeat-drone",
+    "seconds": 3,
+    "prompt": "A low somber descending drone: deep cello and muted horn sinking through three falling notes, quiet and resigned.",
+    "event": "lose"
+  },
+  {
+    "name": "vote-token",
+    "seconds": 1,
+    "prompt": "A small clay token dropped into a wooden bowl: single hollow clack with a brief rattle settling, dry and close.",
+    "event": "vote"
+  },
+  {
+    "name": "clock-tick",
+    "seconds": 1,
+    "prompt": "A single quiet mechanical clock tick: tiny precise snap of an escapement, very short, dry, unobtrusive.",
+    "event": "tick"
+  }
+]

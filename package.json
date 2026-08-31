@@ -1,0 +1,16 @@
+{
+  "name": "hidden-council",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test/run.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "three": "^0.185.1"
+  }
+}
