@@ -1,6 +1,6 @@
 'use strict';
 // Hidden Council — test runner. Plain node, no dependencies.
-// Run: node test/run.js
+// Run: node tests/run.js
 
 const assert = require('assert');
 
