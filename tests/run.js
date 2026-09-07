@@ -14,6 +14,10 @@ function test(name, fn) {
 }
 
 async function main() {
+  // Keep the repo's scores.json clean: the server writes to a scratch file.
+  process.env.HC_SCORES_FILE = require('path').join(require('os').tmpdir(), 'hidden-council-test-scores.json');
+  try { require('fs').unlinkSync(process.env.HC_SCORES_FILE); } catch (e) { /* absent */ }
+
   const rules = await import('../src/rules.js');
   const content = await import('../src/content.js');
   const { hashStr } = await import('../src/util.js');
@@ -140,6 +144,48 @@ async function main() {
     // Commands after the end are rejected.
     const after = rules.applyCommand(s, { id: 'r' + n++, type: 'wait', player: crew[0].id });
     assert(!after.ok && after.reason === 'game_over');
+  });
+
+  await test('emergency chime: allowance granted, spent, then refused', () => {
+    let s = rules.createInitialState(CFG);
+    const p = s.players[0];
+    assert(rules.legalActions(s, p.id).some((a) => a.type === 'call'), 'call must be offered while an allowance remains');
+    const r = rules.applyCommand(s, { id: 'm1', type: 'call', player: p.id });
+    assert(r.ok, JSON.stringify(r));
+    s = r.state;
+    assert.strictEqual(s.phase, 'meeting');
+    assert.strictEqual(s.meetingsLeft[p.id], 0);
+    // Resolve the meeting by voting to skip, then the chime is spent.
+    let n = 0;
+    for (const q of rules.alivePlayers(s)) {
+      if (s.phase !== 'meeting') break;
+      s = rules.applyCommand(s, { id: 'v' + n++, type: 'vote', player: q.id, choice: 'skip' }).state;
+    }
+    assert.strictEqual(s.phase, 'play');
+    assert(!rules.legalActions(s, p.id).some((a) => a.type === 'call'));
+    const again = rules.applyCommand(s, { id: 'm2', type: 'call', player: p.id });
+    assert(!again.ok && again.reason === 'no_meetings_left');
+  });
+
+  await test('no-saboteur config (tutorials) is honoured and does not end instantly', () => {
+    let s = rules.createInitialState(Object.assign({}, CFG, { playerCount: 4, saboteurCount: 0, taskCount: 3 }));
+    assert.strictEqual(s.players.filter((p) => p.role === 'saboteur').length, 0);
+    const r = rules.applyCommand(s, { id: 'w0', type: 'wait', player: 'p0' });
+    assert(r.ok);
+    assert.strictEqual(r.state.phase, 'play');
+    assert.strictEqual(r.state.winner, null);
+  });
+
+  await test('playerWon reads the seat\'s own allegiance', () => {
+    const s = rules.createInitialState(CFG);
+    const sab = s.players.find((p) => p.role === 'saboteur');
+    const crew = s.players.find((p) => p.role === 'crew');
+    s.winner = 'saboteurs';
+    assert.strictEqual(rules.playerWon(s, sab.id), true);
+    assert.strictEqual(rules.playerWon(s, crew.id), false);
+    s.winner = 'crew';
+    assert.strictEqual(rules.playerWon(s, sab.id), false);
+    assert.strictEqual(rules.playerWon(s, crew.id), true);
   });
 
   await test('duplicate command id rejected idempotently', () => {
@@ -301,6 +347,18 @@ async function main() {
     }
   });
 
+  await test('content: stage goal limits reach the rules config', () => {
+    const limited = content.JOURNEY.filter((st) => st.goals.timeLimit != null || st.goals.moveLimit != null);
+    assert(limited.length > 0, 'expected pressure stages');
+    for (const st of limited) {
+      assert.strictEqual(st.config.timeLimit ?? null, st.goals.timeLimit ?? null, st.id + ' time limit');
+      assert.strictEqual(st.config.moveLimit ?? null, st.goals.moveLimit ?? null, st.id + ' move limit');
+      const s = rules.createInitialState(st.config);
+      assert.strictEqual(s.goals.timeLimit ?? null, st.goals.timeLimit ?? null, st.id + ' state time limit');
+      assert.strictEqual(s.goals.moveLimit ?? null, st.goals.moveLimit ?? null, st.id + ' state move limit');
+    }
+  });
+
   await test('content: 5 themes, tutorials, daily deterministic per UTC day', () => {
     assert.strictEqual(content.THEMES.length, 5);
     assert(content.TUTORIALS.length >= 3);
@@ -411,6 +469,9 @@ async function main() {
     await waitFor(() => msgs.some((m) => m.type === 'started'), 4000);
     const started = msgs.find((m) => m.type === 'started');
     assert(started.state && started.state.players.length === 4);
+    // Seat ids let a client map its lobby seat to its player id.
+    const mySeat = started.seats.find((s) => s.id === snap.you);
+    assert(mySeat && mySeat.playerId === 'p0', 'started must identify seats: ' + JSON.stringify(started.seats));
     // Send an authoritative command from our seat (p0).
     const p0 = started.state.players[0];
     const room = rules.STATION_ROOMS.find((r) => r.id === p0.room);
@@ -422,6 +483,39 @@ async function main() {
     ws.close();
   });
 
+  await test('server: second human seat maps to its own player id', async () => {
+    const host = await connectWs(base.replace('http', 'ws') + '/ws');
+    const guest = await connectWs(base.replace('http', 'ws') + '/ws');
+    const hm = [], gm = [];
+    host.onMessage((m) => hm.push(m));
+    guest.onMessage((m) => gm.push(m));
+    host.send({ type: 'create', name: 'Host' });
+    await waitFor(() => hm.some((m) => m.type === 'room'));
+    const code = hm.filter((m) => m.type === 'room').pop().code;
+    guest.send({ type: 'join', code, name: 'Guest' });
+    await waitFor(() => gm.some((m) => m.type === 'room' && m.you));
+    const mySeatId = gm.filter((m) => m.type === 'room' && m.you).pop().you;
+    host.send({ type: 'addAi' }); host.send({ type: 'addAi' });
+    await waitFor(() => hm.filter((m) => m.type === 'room').pop().seats.length >= 4);
+    host.send({ type: 'ready', ready: true });
+    guest.send({ type: 'ready', ready: true });
+    await waitFor(() => hm.filter((m) => m.type === 'room').pop().seats.every((s) => s.ready));
+    host.send({ type: 'start' });
+    await waitFor(() => gm.some((m) => m.type === 'started'), 4000);
+    const started = gm.find((m) => m.type === 'started');
+    const mine = started.seats.find((s) => s.id === mySeatId);
+    assert(mine && mine.playerId === 'p1', 'guest seat must resolve to p1: ' + JSON.stringify(started.seats));
+    // A command issued as that player id is accepted (not identity_mismatch).
+    const me = started.state.players.find((p) => p.id === mine.playerId);
+    const link = rules.STATION_ROOMS.find((r) => r.id === me.room).links[0];
+    guest.send({ type: 'command', command: { id: 'g-1', type: 'move', player: mine.playerId, room: link } });
+    await waitFor(() => gm.some((m) => m.type === 'state' && m.state.players.find((p) => p.id === mine.playerId).room === link), 4000);
+    assert(!gm.some((m) => m.type === 'error' && m.error === 'identity_mismatch'));
+    host.close(); guest.close();
+  });
+
+  // Upgraded WebSocket sockets are not closed by server.close() alone.
+  if (server.closeAllConnections) server.closeAllConnections();
   server.close();
 
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
@@ -429,6 +523,8 @@ async function main() {
     for (const f of failures) console.log('  - ' + f);
     process.exit(1);
   }
+  // Idle keep-alive sockets from fetch can outlive the run; exit deliberately.
+  process.exit(0);
 }
 
 // Minimal WS test client (matches server framing).

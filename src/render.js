@@ -67,6 +67,11 @@ export class StationRenderer {
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(CAM_FRAME.fov, 1, 0.1, 200);
+    // Selection ring and legal-target previews live on their own layers; the
+    // camera renders only layer 0 unless the other layers are enabled.
+    this.camera.layers.enable(LAYER_GAME);
+    this.camera.layers.enable(LAYER_SELECT);
+    this.camera.layers.enable(LAYER_FX);
     this.raycaster = new THREE.Raycaster();
     this.raycaster.layers.set(LAYER_GAME);
 
@@ -75,7 +80,7 @@ export class StationRenderer {
     this.buildSelectionAids();
     this.setQuality((opts && opts.tier) || 'medium');
     this.placeCamera('core', true);
-    this.clock = new THREE.Clock();
+    this.lastFrame = 0;
     this.animate = this.animate.bind(this);
     this.raf = requestAnimationFrame(this.animate);
   }
@@ -342,8 +347,18 @@ export class StationRenderer {
     const q = QUALITY[tier] || QUALITY.medium;
     this.tier = tier;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio));
+    const shadowsChanged = this.renderer.shadowMap.enabled !== q.shadows;
     this.renderer.shadowMap.enabled = q.shadows;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    if (shadowsChanged) {
+      // Shader programs are compiled against the shadow setting: without a
+      // recompile they keep sampling shadow maps that no longer exist, which
+      // drops every lit object from the frame.
+      this.scene.traverse((o) => {
+        if (!o.material) return;
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { m.needsUpdate = true; });
+      });
+    }
     this.renderScale = q.renderScale;
     for (const g of this.gears) {
       const order = { low: 0, medium: 1, high: 2 };
@@ -375,8 +390,10 @@ export class StationRenderer {
   animate() {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.animate);
-    if (this.hidden || this.failed || this.contextLost) return; // zero-render heartbeat while hidden
-    const dt = Math.min(this.clock.getDelta(), 0.1);
+    if (this.hidden || this.failed || this.contextLost) { this.lastFrame = 0; return; } // zero-render heartbeat while hidden
+    const now = performance.now() / 1000;
+    const dt = Math.min(this.lastFrame ? now - this.lastFrame : 0, 0.1);
+    this.lastFrame = now;
     this.time += dt;
 
     // Camera transition (interruptible, eased — not cumulative lerp).

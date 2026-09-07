@@ -187,10 +187,11 @@ class App {
   onState(state, events) {
     if (this.renderer) {
       this.renderer.syncState(state);
-      const me = state.players[0];
+      const myId = this.session ? this.session.humanId : 'p0';
+      const me = state.players.find((p) => p.id === myId);
       if (me && me.room !== this.renderer.focusRoom) this.renderer.placeCamera(me.room, false);
       const legal = this.session ? this.session.legal() : [];
-      this.renderer.select('p0');
+      this.renderer.select(myId);
       this.renderer.showLegalTargets(this.settings.hints && this.assists ? legal.filter((a) => a.type === 'move').map((a) => a.room) : []);
     }
     if (this.session) this.ui.updateHud(state, this.session.legal(), this.stage);
@@ -211,10 +212,10 @@ class App {
     if (!tut) return;
     const steps = tut.def.steps;
     if (tut.step >= steps.length) return;
-    const last = this.session.commands.filter((c) => c.player === 'p0').pop();
+    const last = this.session.commands.filter((c) => c.player === this.session.humanId).pop();
     if (last && last.type === steps[tut.step].expect) {
       tut.step++;
-      this.audio.event('task', 5);
+      this.audio.event('ack', 5); // 'task' captions "Task complete", which misleads here
       if (tut.step >= steps.length) {
         this.save.tutorialDone[tut.def.id] = true;
         this.persistSave();
@@ -274,17 +275,18 @@ class App {
 
   onEnd(result) {
     this.phase = 'resolving';
+    const won = !!result.playerWon;
     if (this.session && !this.ws) {
       const fresh = this.session.recordCompletion(this.save);
       this.persistSave();
       this.submitScore(result, (err) => {
         this.phase = 'results';
-        this.audio.event(result.winner === 'crew' ? 'win' : 'lose', 9);
+        this.audio.event(won ? 'win' : 'lose', 9);
         this.ui.showScreen(this.ui.resultsScreen(result, this.stage, fresh, { leaderboardError: err }));
       });
     } else {
       this.phase = 'results';
-      this.audio.event(result.winner === 'crew' ? 'win' : 'lose', 9);
+      this.audio.event(won ? 'win' : 'lose', 9);
       this.ui.showScreen(this.ui.resultsScreen(result, this.stage, [], {}));
     }
   }
@@ -320,13 +322,20 @@ class App {
     this.ws.onmessage = (ev) => {
       let msg;
       try { msg = JSON.parse(ev.data); } catch (e) { return; }
-      if (msg.type === 'room') this.ui.updateLobby(msg);
+      if (msg.type === 'room') {
+        if (msg.you) this.hostedSeatId = msg.you; // remember which seat is ours
+        this.ui.updateLobby(msg);
+      }
       if (msg.type === 'started') {
         this.stage = { id: 'hosted', name: 'Hosted Council', seed: msg.state.seed, config: msg.state, goals: { tasks: msg.state.tasks.length }, par: 80, difficulty: 3, theme: this.settings.theme };
         this.session = new SoloSession({ id: 'hosted', seed: msg.state.seed, config: { seed: msg.state.seed, playerCount: msg.state.players.length, saboteurCount: 1, taskCount: msg.state.tasks.length } }, {
-          onState: (s, e) => this.onState(s, e), onReject: () => {}, onEnd: () => {},
+          onState: (s, e) => this.onState(s, e), onReject: (reason) => this.onReject(reason), onEnd: (result) => this.onEnd(result),
         });
         this.session.stopAi();
+        // Our seat is rarely p0 in a hosted room: commands must carry our own
+        // player id or the server rejects them as identity_mismatch.
+        const mine = (msg.seats || []).find((s) => s.id === this.hostedSeatId);
+        this.session.humanId = mine && mine.playerId ? mine.playerId : 'p0';
         this.ui.showScreen(null);
         this.buildRenderer(this.stage);
         this.phase = 'active';
@@ -340,7 +349,6 @@ class App {
       if (msg.type === 'rejected') this.onReject(msg.reason);
       if (msg.type === 'results') {
         this.applyHostedState(msg.state, []);
-        if (this.session) this.session.finish();
       }
       if (msg.type === 'error') this.ui.caption('Server: ' + msg.error);
     };

@@ -10,7 +10,8 @@ const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT) || 8090;
 const ROOT = __dirname;
-const SCORES_FILE = path.join(ROOT, 'scores.json');
+// Tests point HC_SCORES_FILE at a scratch path so runs don't rewrite repo data.
+const SCORES_FILE = process.env.HC_SCORES_FILE || path.join(ROOT, 'scores.json');
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -20,11 +21,18 @@ const CONTENT_TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  '.svg': 'image/svg+xml',
   '.opus': 'audio/ogg',
+  '.ogg': 'audio/ogg',
+  '.wav': 'audio/wav',
 };
 
 let rules = null; // loaded async in init()
-const ready = import('./src/rules.js').then((m) => { rules = m; });
+let util = null;
+const ready = Promise.all([
+  import('./src/rules.js').then((m) => { rules = m; }),
+  import('./src/util.js').then((m) => { util = m; }),
+]);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -234,7 +242,7 @@ function startRoomGame(room) {
   room.phase = 'playing';
   room.awayLog = [];
   roomLog(room, 0, 'The council session begins.');
-  broadcast(room, { type: 'started', state: room.state, seats: room.seats.map((s) => ({ playerId: s.playerId, ai: s.ai })) });
+  broadcast(room, { type: 'started', state: room.state, seats: room.seats.map((s) => ({ id: s.id, name: s.name, playerId: s.playerId, ai: s.ai })) });
   runRoomAi(room);
 }
 
@@ -257,7 +265,7 @@ function runRoomAi(room) {
       if (!seat.ai) continue;
       const p = state.players.find((x) => x.id === seat.playerId);
       if (!p || !p.alive) continue;
-      if (rules.rand01(state.seed, state.tick + room.seats.indexOf(seat) * 31) < 0.5) continue; // pace AI
+      if (util.rand01(state.seed, state.tick + room.seats.indexOf(seat) * 31) < 0.5) continue; // pace AI
       const cmd = rules.aiCommand(state, seat.playerId, 'srv-' + room.code + '-' + state.tick + '-' + seat.playerId);
       if (cmd) { applyRoomCommand(room, seat, cmd); acted = true; break; }
     }
@@ -390,6 +398,13 @@ function sendWs(client, obj) {
 }
 
 function attachWebSocket(server) {
+  // Upgraded sockets are detached from the HTTP server's connection tracking,
+  // so server.close() would otherwise never finish shutting down.
+  const sockets = new Set();
+  server.on('close', () => {
+    for (const s of sockets) { try { s.destroy(); } catch (e) { /* already gone */ } }
+    sockets.clear();
+  });
   server.on('upgrade', (req, socket) => {
     if (!req.url.startsWith('/ws')) { socket.destroy(); return; }
     const key = req.headers['sec-websocket-key'];
@@ -401,6 +416,8 @@ function attachWebSocket(server) {
       'Sec-WebSocket-Accept: ' + wsAccept(key) + '\r\n\r\n'
     );
     socket.setNoDelay(true);
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
     const client = { id: nextClientId++, socket, room: null, seatId: null };
     const close = () => { try { socket.destroy(); } catch (e) {} };
     const parse = wsParser(
@@ -410,9 +427,17 @@ function attachWebSocket(server) {
     socket.on('data', parse);
     socket.on('close', () => {
       if (client.room) {
-        const seat = client.room.seats.find((s) => s.id === client.seatId);
+        const room = client.room;
+        const seat = room.seats.find((s) => s.id === client.seatId);
         if (seat) { seat.client = null; seat.ready = false; }
-        broadcast(client.room, roomSnapshot(client.room));
+        // Drop rooms nobody is connected to, so their AI timer stops ticking.
+        if (!room.seats.some((s) => s.client)) {
+          if (room.aiTimer) { clearTimeout(room.aiTimer); room.aiTimer = null; }
+          room.phase = 'closed';
+          rooms.delete(room.code);
+          return;
+        }
+        broadcast(room, roomSnapshot(room));
       }
     });
     socket.on('error', () => {});

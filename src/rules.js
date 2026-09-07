@@ -87,9 +87,11 @@ const TASK_LABELS = [
 
 export function createInitialState(config) {
   const seed = (config.seed >>> 0) || 1;
-  const playerCount = config.playerCount || 6;
-  const saboteurCount = config.saboteurCount || 1;
-  const taskCount = config.taskCount || 8;
+  const playerCount = config.playerCount != null ? config.playerCount : 6;
+  // 0 saboteurs is a legitimate configuration (tutorials); only fill in when unset.
+  const saboteurCount = config.saboteurCount != null ? config.saboteurCount : 1;
+  const taskCount = config.taskCount != null ? config.taskCount : 8;
+  const meetingsPerPlayer = config.meetingsPerPlayer != null ? config.meetingsPerPlayer : 1;
 
   // Deterministic role assignment from seed.
   const order = [];
@@ -121,6 +123,10 @@ export function createInitialState(config) {
     tasks.push({ id: 't' + i, room: STATION_ROOMS[ri].id, label: TASK_LABELS[(li + i) % TASK_LABELS.length], done: false, doneBy: null });
   }
 
+  // Every player starts with the same allowance of emergency chimes.
+  const meetingsLeft = {};
+  for (const p of players) meetingsLeft[p.id] = meetingsPerPlayer;
+
   return {
     v: RULES_VERSION,
     seed,
@@ -132,7 +138,7 @@ export function createInitialState(config) {
     tasks,
     bodies: [], // {id, player, room, reported}
     meeting: null, // {reason, by, votes:{voter:choice}}
-    meetingsLeft: {}, // playerId -> count
+    meetingsLeft, // playerId -> remaining emergency meetings
     cooldowns: {}, // saboteurId -> tick when eliminate is ready
     elimCooldown: config.elimCooldown != null ? config.elimCooldown : 8,
     goals: {
@@ -268,7 +274,10 @@ function checkTerminal(state) {
     logEvent(state, 'end', 'Every task is complete. The crew restores the station.');
     return;
   }
-  if (sab === 0) {
+  // A session configured without saboteurs (tutorials) is won by finishing
+  // tasks, not by starting with nobody to eject.
+  const hadSaboteurs = state.players.some((p) => p.role === 'saboteur');
+  if (hadSaboteurs && sab === 0) {
     state.phase = 'over'; state.winner = 'crew'; state.winReason = 'saboteurs_ejected';
     logEvent(state, 'end', 'All saboteurs have been voted out. The crew prevails.');
     return;
@@ -524,7 +533,8 @@ export function simulate(config, maxCommands) {
         if (!(pl.id in state.meeting.votes)) {
           const cmd = aiCommand(state, pl.id, 'sim' + n++);
           const res = applyCommand(state, cmd);
-          state = res.state;
+          // Hard rejections (duplicate id, game over) carry no state.
+          state = res.state || state;
         }
       }
     } else {
@@ -533,7 +543,7 @@ export function simulate(config, maxCommands) {
       const pl = roster[n % roster.length];
       const cmd = aiCommand(state, pl.id, 'sim' + n++);
       const res = applyCommand(state, cmd);
-      state = res.state;
+      state = res.state || state;
       n++;
     }
   }
@@ -543,6 +553,14 @@ export function simulate(config, maxCommands) {
 // ---------------------------------------------------------------------------
 // Scoring
 // ---------------------------------------------------------------------------
+
+// Did this player's side win? The human seat can be dealt either role, so
+// victory must be read against that player's allegiance, not against 'crew'.
+export function playerWon(state, playerId) {
+  const p = getPlayer(state, playerId);
+  if (!p || !state.winner) return false;
+  return state.winner === (p.role === 'saboteur' ? 'saboteurs' : 'crew');
+}
 
 export function scoreBreakdown(state, playerId) {
   const p = getPlayer(state, playerId);

@@ -70,8 +70,9 @@ function stageConfig(i) {
   };
   const par = 30 + taskCount * 5 + playerCount * 3 - d * 2;
   const goals = { tasks: taskCount, survive: true };
-  if (i >= 16 && i % 4 === 1) goals.timeLimit = par + 40; // time-pressure stages
-  if (i >= 24 && i % 4 === 3) goals.moveLimit = taskCount * 4 + playerCount * 2; // move-limit stages
+  // Limits must also reach the rules engine, which reads them from the config.
+  if (i >= 16 && i % 4 === 1) { goals.timeLimit = par + 40; cfg.timeLimit = goals.timeLimit; } // time-pressure stages
+  if (i >= 24 && i % 4 === 3) { goals.moveLimit = taskCount * 4 + playerCount * 2; cfg.moveLimit = goals.moveLimit; } // move-limit stages
   return {
     id: 'journey-' + (i + 1),
     index: i,

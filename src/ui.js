@@ -174,9 +174,9 @@ export class UI {
     const row = this.el('div', 'hc-row');
     row.append(
       this.button('Daily Chime', '', () => this.app.startDaily()),
-      this.button('Journey', '', () => this.journeyScreen(save)),
-      this.button('Hosted Play', '', () => this.hostedScreen()),
-      this.button('Help', '', () => this.helpScreen()),
+      this.button('Journey', '', () => this.showScreen(this.journeyScreen(save))),
+      this.button('Hosted Play', '', () => this.showScreen(this.hostedScreen())),
+      this.button('Help', '', () => this.showScreen(this.helpScreen())),
     );
     s.appendChild(row);
     const prof = this.el('div', 'hc-profile');
@@ -187,7 +187,7 @@ export class UI {
     name.addEventListener('change', () => { save.profile.name = name.value.trim() || save.profile.name; this.app.persistSave(); });
     prof.append(this.el('label', '', 'Tinkerer: '), name, this.el('span', 'hc-muted', ` · ${save.sessions} sessions · streak ${save.streak}`));
     s.appendChild(prof);
-    const settingsBtn = this.button('⚙ Settings', 'hc-subtle', () => this.settingsScreen());
+    const settingsBtn = this.button('⚙ Settings', 'hc-subtle', () => this.showScreen(this.settingsScreen()));
     s.appendChild(settingsBtn);
     return s;
   }
@@ -195,12 +195,12 @@ export class UI {
   modeSelectScreen() {
     const s = this.screen('Choose Your Session');
     const modes = [
-      ['Tutorial', 'Learn one rule at a time.', () => this.tutorialScreen()],
-      ['Journey', '40 staged councils, growing pressure.', () => this.journeyScreen(this.app.save)],
+      ['Tutorial', 'Learn one rule at a time.', () => this.showScreen(this.tutorialScreen())],
+      ['Journey', '40 staged councils, growing pressure.', () => this.showScreen(this.journeyScreen(this.app.save))],
       ['Daily Chime', 'One shared seed per UTC day. Ranked.', () => this.app.startDaily()],
-      ['Practice', 'Any difficulty. Undo allowed. Unranked.', () => this.practiceScreen()],
-      ['Challenge', 'Constrained goals: beat the clock, sure-footed.', () => this.challengeScreen()],
-      ['Hosted Play', 'Create or join a room with others.', () => this.hostedScreen()],
+      ['Practice', 'Any difficulty. Undo allowed. Unranked.', () => this.showScreen(this.practiceScreen())],
+      ['Challenge', 'Constrained goals: beat the clock, sure-footed.', () => this.showScreen(this.challengeScreen())],
+      ['Hosted Play', 'Create or join a room with others.', () => this.showScreen(this.hostedScreen())],
     ];
     for (const [name, desc, fn] of modes) {
       const b = this.button(name, 'hc-mode', fn);
@@ -326,7 +326,7 @@ export class UI {
     const s = this.screen('Paused');
     s.appendChild(this.button('▶ Resume', 'hc-play', () => this.app.resumeGame()));
     s.appendChild(this.settingsBlock());
-    s.appendChild(this.button('Help', '', () => this.helpScreen(true)));
+    s.appendChild(this.button('Help', '', () => this.showScreen(this.helpScreen(true))));
     s.appendChild(this.button('Leave Session', 'hc-subtle', () => this.app.leaveGame()));
     return s;
   }
@@ -385,16 +385,19 @@ export class UI {
   settingsScreen() {
     const s = this.screen('Settings');
     s.appendChild(this.settingsBlock());
-    s.appendChild(this.button('Replay Tutorials', '', () => this.tutorialScreen()));
+    s.appendChild(this.button('Replay Tutorials', '', () => this.showScreen(this.tutorialScreen())));
     s.appendChild(this.button('← Back', 'hc-subtle', () => this.app.showTitle()));
     return s;
   }
 
   resultsScreen(result, stage, freshAchievements, meta) {
-    const won = result.winner === 'crew';
+    // Victory is judged against the seat's own allegiance, not always the crew.
+    const won = result.playerWon != null ? !!result.playerWon : result.winner === 'crew';
     const s = this.screen(won ? 'The Station Turns Again' : 'The Gears Fall Silent');
     s.setAttribute('aria-live', 'assertive');
-    s.appendChild(this.el('p', 'hc-headline', won ? 'Crew victory — ' + reasonText(result.winReason) : 'Saboteur victory — ' + reasonText(result.winReason)));
+    const side = result.winner === 'crew' ? 'Crew victory' : 'Saboteur victory';
+    s.appendChild(this.el('p', 'hc-headline', side + ' — ' + reasonText(result.winReason)
+      + (result.playerRole ? ' · you played ' + (result.playerRole === 'saboteur' ? 'a saboteur' : 'loyal crew') : '')));
 
     const table = this.el('table', 'hc-score');
     table.appendChild(this.el('caption', '', 'Score breakdown'));
@@ -418,10 +421,22 @@ export class UI {
     s.append(
       this.button('↻ Retry', 'hc-mode', () => this.app.retry()),
       this.button('Next Stage', 'hc-play', () => this.app.nextStage()),
-      this.button('Copy Replay Hash: ' + result.hash.toString(16), 'hc-subtle', () => {}),
+      this.button('Copy Replay Hash: ' + result.hash.toString(16), 'hc-subtle', () => this.copyText(result.hash.toString(16))),
       this.button('← Title', 'hc-subtle', () => this.app.leaveGame()),
     );
     return s;
+  }
+
+  // Clipboard with a legacy fallback; always acknowledges through the caption.
+  copyText(text) {
+    const done = (ok) => { this.caption(ok ? 'Copied: ' + text : 'Copy failed — ' + text); this.announce(ok ? 'Copied to clipboard' : 'Copy failed'); };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => done(true), () => done(false));
+        return;
+      }
+    } catch (e) { /* fall through */ }
+    done(false);
   }
 
   helpScreen(inGame) {

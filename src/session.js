@@ -2,7 +2,7 @@
 // Session module: solo/hosted game driver, persistence, achievements,
 // server-time sync. No DOM/THREE knowledge beyond callbacks.
 
-import { createInitialState, applyCommand, legalActions, aiCommand, scoreBreakdown, stateHash, serialize, deserialize, RULES_VERSION } from './rules.js';
+import { createInitialState, applyCommand, legalActions, aiCommand, scoreBreakdown, playerWon, stateHash, serialize, deserialize, RULES_VERSION } from './rules.js';
 import { CONTENT_VERSION } from './content.js';
 import { hashStr } from './util.js';
 
@@ -215,6 +215,7 @@ export class SoloSession {
       const cmd = aiCommand(st, actor.id, 'ai-' + st.tick + '-' + actor.id + '-' + this.cmdCounter++);
       if (!cmd) break;
       const res = applyCommand(st, cmd);
+      if (!res.state) { if (++guard > 50) break; continue; } // rejected before any effect
       this.state = res.state;
       this.commands.push(cmd);
       if (!res.ok) { if (++guard > 50) break; continue; }
@@ -241,6 +242,7 @@ export class SoloSession {
       const cmd = aiCommand(st, actor.id, 'ff-' + guard + '-' + actor.id);
       if (!cmd) break;
       const res = applyCommand(st, cmd);
+      if (!res.state) continue; // rejected before any effect; state unchanged
       this.state = res.state;
       this.commands.push(cmd);
     }
@@ -254,9 +256,12 @@ export class SoloSession {
 
   result() {
     const score = scoreBreakdown(this.state, this.humanId);
+    const me = this.state.players.find((p) => p.id === this.humanId);
     return {
       winner: this.state.winner,
       winReason: this.state.winReason,
+      playerRole: me ? me.role : 'crew',
+      playerWon: playerWon(this.state, this.humanId),
       score,
       hash: stateHash(this.state),
       ticks: this.state.tick,
@@ -279,7 +284,7 @@ export class SoloSession {
   recordCompletion(save) {
     const res = this.result();
     save.sessions += 1;
-    const humanWon = (res.winner === 'crew'); // human is always crew seat p0
+    const humanWon = res.playerWon; // the human seat can be dealt either role
     if (humanWon) { save.wins += 1; save.streak += 1; } else { save.streak = 0; }
     save.bestStreak = Math.max(save.bestStreak, save.streak);
     for (const c of this.commands) if (c.player === this.humanId) save.actionsUsed.push(c.type);

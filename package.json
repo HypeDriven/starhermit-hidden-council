@@ -4,13 +4,17 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node tests/run.js"
+    "test": "node tests/run.js",
+    "test:e2e": "node tests/e2e.mjs"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "dependencies": {
     "esbuild": "^0.28.2",
     "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.62.1"
   }
 }
