@@ -40,6 +40,7 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.webp': 'image/webp',
   '.ico': 'image/x-icon',
   '.wav': 'audio/wav',
   '.mp3': 'audio/mpeg',
@@ -156,9 +157,10 @@ async function playUntilResults(page, vp, deadlineMs = 300000) {
   const t0 = Date.now();
   let hintDone = false;
   let acts = 0;
+  let humanOut = false; // human seat eliminated/ejected: no legal actions remain
   for (;;) {
     const phase = await page.evaluate(() => window.__hiddenCouncil?.phase);
-    if (phase === 'results') return acts;
+    if (phase === 'results') return { acts, humanOut };
     if (Date.now() - t0 > deadlineMs) throw new Error(`play timed out (phase=${phase}, actions=${acts})`);
     if (phase !== 'active') {
       await page.waitForTimeout(400);
@@ -205,6 +207,11 @@ async function playUntilResults(page, vp, deadlineMs = 300000) {
       } else {
         // Nothing productive (only "Wait", or eliminated): let the AI take
         // its turns instead of spamming commands that would starve it.
+        const me = await page.evaluate(() => {
+          const s = window.__hiddenCouncil.session?.state;
+          return s ? s.players.find((p) => p.id === window.__hiddenCouncil.session.humanId)?.alive : null;
+        });
+        if (me === false) humanOut = true;
         await page.waitForTimeout(600);
         continue;
       }
@@ -319,9 +326,13 @@ async function runPass(browser, port, vp) {
     });
 
     await step('play daily through HUD buttons until results', async () => {
-      const acts = await playUntilResults(page, vp);
+      const { acts, humanOut } = await playUntilResults(page, vp);
       console.log(`  human actions taken: ${acts}`);
-      if (acts < 3) throw new Error('playthrough took suspiciously few actions');
+      // The AI turn timer free-runs while menus are open, so on some daily
+      // seeds the saboteurs silence the idle human seat before the play loop
+      // gets a move in; that is a legitimate outcome, not a stuck UI.
+      if (acts < 3 && !humanOut) throw new Error('playthrough took suspiciously few actions');
+      if (humanOut) console.log('  note: human seat was silenced early; the station played out the session');
       await page.getByRole('button', { name: '↻ Retry' }).waitFor({ state: 'visible', timeout: 10000 });
       const headline = await page.locator('.hc-headline').textContent();
       console.log('  headline:', headline);

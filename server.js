@@ -20,6 +20,7 @@ const CONTENT_TYPES = {
   '.txt': 'text/plain; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
+  '.webp': 'image/webp',
   '.ico': 'image/x-icon',
   '.svg': 'image/svg+xml',
   '.opus': 'audio/ogg',
@@ -491,6 +492,8 @@ const server = http.createServer(async (req, res) => {
     // Static files.
     let rel = p === '/' ? '/index.html' : p;
     if (rel.includes('..')) return sendError(res, 403, 'forbidden');
+    // Dev-only trees and dotfiles are never shipped or served.
+    if (/^\/(tests|tools|node_modules)\//.test(rel) || /\/\./.test(rel)) return sendError(res, 403, 'forbidden');
     const file = path.join(ROOT, rel);
     if (!file.startsWith(ROOT)) return sendError(res, 403, 'forbidden');
     fs.readFile(file, (err, data) => {

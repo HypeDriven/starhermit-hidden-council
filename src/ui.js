@@ -168,6 +168,7 @@ export class UI {
 
   titleScreen(save, settings) {
     const s = this.screen('Hidden Council');
+    s.classList.add('hc-screen-title');
     s.appendChild(this.el('p', 'hc-tagline', 'A clockwork station. A hidden hand. A council of gears.'));
     const play = this.button('▶ Play', 'hc-play', () => this.app.showModeSelect());
     s.appendChild(play);
@@ -395,6 +396,14 @@ export class UI {
     const won = result.playerWon != null ? !!result.playerWon : result.winner === 'crew';
     const s = this.screen(won ? 'The Station Turns Again' : 'The Gears Fall Silent');
     s.setAttribute('aria-live', 'assertive');
+    // Decorative results illustration; the screen reads identically without it.
+    const hero = this.el('img', 'hc-hero-img');
+    hero.src = './assets/council-chamber.webp';
+    hero.alt = '';
+    hero.setAttribute('aria-hidden', 'true');
+    hero.decoding = 'async';
+    hero.addEventListener('error', () => { hero.remove(); });
+    s.appendChild(hero);
     const side = result.winner === 'crew' ? 'Crew victory' : 'Saboteur victory';
     s.appendChild(this.el('p', 'hc-headline', side + ' — ' + reasonText(result.winReason)
       + (result.playerRole ? ' · you played ' + (result.playerRole === 'saboteur' ? 'a saboteur' : 'loyal crew') : '')));

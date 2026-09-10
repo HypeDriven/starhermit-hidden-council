@@ -20,6 +20,10 @@ const EVENT_SAMPLES = {
   lose: ['defeat-drone'],
   vote: ['vote-token'],
   tick: ['clock-tick'],
+  start: ['session-start'],
+  undo: ['undo-rewind'],
+  hint: ['hint-whisper'],
+  achievement: ['achievement-chime'],
 };
 
 export class AudioEngine {
@@ -133,6 +137,10 @@ export class AudioEngine {
       case 'lose': if (!sampled) this.chime('music', [392, 330, 262, 196], 0.16, 0.9, 0.16); this.say('Defeat'); break;
       case 'vote': if (!sampled) this.blip('voice', 700 * (1 + v), 0.1, 'sine', 0.12); break;
       case 'tick': if (!sampled) this.blip('effects', 1200, 0.03, 'square', 0.04); break;
+      case 'start': if (!sampled) this.chime('music', [392, 523, 659], 0.1, 0.7, 0.14); this.say('Session begins'); break;
+      case 'undo': if (!sampled) { this.blip('effects', 520, 0.09, 'triangle', 0.1); this.blip('effects', 390, 0.09, 'triangle', 0.08); } break;
+      case 'hint': if (!sampled) this.blip('voice', 880 * (1 + v), 0.12, 'sine', 0.07); break;
+      case 'achievement': if (!sampled) this.chime('music', [784, 988, 1319], 0.08, 0.5, 0.13); this.say('Achievement unlocked'); break;
     }
   }
 

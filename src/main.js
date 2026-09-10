@@ -127,6 +127,7 @@ class App {
         this._cdTimer = setTimeout(step, this.settings.reducedMotion ? 250 : 600);
       } else {
         this.phase = 'active';
+        this.audio.event('start', this.stage ? this.stage.seed : 1);
         this.ui.announce('Go. ' + (this.stage.tutorialText || 'Complete the station tasks.'));
         this.session.scheduleAi();
       }
@@ -252,6 +253,7 @@ class App {
     if (!this.session) return;
     const r = this.session.undo();
     if (!r.ok) this.onReject(r.reason);
+    else this.audio.event('undo', 4);
   }
 
   hint() {
@@ -270,7 +272,7 @@ class App {
     }[pri.type];
     this.ui.caption('Hint: ' + text);
     this.ui.announce('Hint: ' + text);
-    this.audio.event('ack', 2);
+    this.audio.event('hint', 2);
   }
 
   onEnd(result) {
@@ -282,6 +284,7 @@ class App {
       this.submitScore(result, (err) => {
         this.phase = 'results';
         this.audio.event(won ? 'win' : 'lose', 9);
+        if (fresh && fresh.length) setTimeout(() => this.audio.event('achievement', 11), 700);
         this.ui.showScreen(this.ui.resultsScreen(result, this.stage, fresh, { leaderboardError: err }));
       });
     } else {

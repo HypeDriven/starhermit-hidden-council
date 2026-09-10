@@ -1,0 +1,23 @@
+# Hidden Council — canonical SFX manifest
+# format: file | event id | description of the sound | usage context
+# Event ids are the `kind` argument to AudioEngine.event() in src/audio.js
+# (EVENT_SAMPLES). Every clip has a WebAudio synth fallback that plays while
+# the sample loads or if the fetch/decode fails.
+# All clips: MOSS-SoundEffect v2.0, 48 kHz mono Opus 96 kbps VBR, loudness-normalised.
+
+sfx/ui-ack.opus | ack | Short muted plastic tap with a gentle high tick, dry, quiet, confirmatory. | Every accepted player command (App.humanAct), arrow-key target cycling, tutorial step completion.
+sfx/ui-reject.opus | reject | Dull low wooden knock followed by a short soft buzz; refusal, not harsh. | Illegal action or rejected command (App.onReject); also captions "Not allowed".
+sfx/footstep.opus | move | Soft heel-first footstep on stone floor in a quiet hall, faint room tone. | Any player or automaton moving between linked rooms (log kind `move`). Variant A.
+sfx/footstep-alt.opus | move | Lighter toe-first footstep on stone with faint grit. | Same event as above; the variant is chosen deterministically from the event seed.
+sfx/task-complete.opus | task | Precise metal latch clicking shut then a warm wooden tick, compact and satisfying. | A crew member completes a station task (log kind `task`); captions "Task complete".
+sfx/council-bell.opus | meeting | Small brass hand bell rung twice in a wood room, clear ding with short decay. | A council convenes — incident reported or emergency chime rung (log kind `meeting`).
+sfx/vote-token.opus | vote | Clay token dropped into a wooden bowl: hollow clack with a brief settling rattle. | Each vote cast during a council (log kind `vote`).
+sfx/eject-whoosh.opus | eject | Heavy sliding door whoosh into a fading air rush. | A council vote ejects a player from the station (log kind `eject`).
+sfx/eliminate-thud.opus | eliminate | Heavy body thud on wood with a low muffled rumble; ominous, brief, no scream. | A saboteur eliminates a crew member (log kind `eliminate`); captioned "An incident occurred".
+sfx/clock-tick.opus | tick | Tiny precise escapement snap, very short and dry. | The 3-2-1 pre-session countdown in App.countdown().
+sfx/session-start.opus | start | Deep winding ratchet into a bright brass chime and the whir of gears engaging. | Fires once as the countdown reaches zero and the session goes active.
+sfx/victory-fanfare.opus | win | Three rising trumpet notes into a bright held chord; small ceremonial ensemble. | Results screen when the player's faction wins (playerWon true).
+sfx/defeat-drone.opus | lose | Deep cello and muted horn sinking through three falling notes; quiet, resigned. | Results screen when the player's faction loses.
+sfx/achievement-chime.opus | achievement | Two rising glockenspiel notes with a delicate metallic sparkle tail. | 700 ms after the results stinger when the session unlocked at least one achievement.
+sfx/undo-rewind.opus | undo | A clockwork spring unwinding backwards with soft ticks, ending abruptly. | A successful undo in Practice/Tutorial modes (U key or the Undo action button).
+sfx/hint-whisper.opus | hint | Gentle breath of steam through a small brass pipe with a faint rising shimmer. | The Hint action (H key or 💡 Hint button) before the hint caption appears.

@@ -70,5 +70,29 @@
     "seconds": 1,
     "prompt": "A single quiet mechanical clock tick: tiny precise snap of an escapement, very short, dry, unobtrusive.",
     "event": "tick"
+  },
+  {
+    "name": "session-start",
+    "seconds": 2,
+    "prompt": "A large clockwork mechanism engaging: a deep winding ratchet followed by a bright brass chime and the whir of gears beginning to turn, ceremonial and warm, no music.",
+    "event": "start"
+  },
+  {
+    "name": "undo-rewind",
+    "seconds": 1,
+    "prompt": "A short reverse winding sound: a clockwork spring unwinding backwards with a soft tick-tick-tick, dry and mechanical, ending abruptly.",
+    "event": "undo"
+  },
+  {
+    "name": "hint-whisper",
+    "seconds": 1,
+    "prompt": "A soft airy hint cue: a gentle breath of steam through a small brass pipe with a faint rising shimmer, quiet, curious, unobtrusive.",
+    "event": "hint"
+  },
+  {
+    "name": "achievement-chime",
+    "seconds": 2,
+    "prompt": "A small reward chime: two bright glockenspiel notes rising, with a delicate metallic sparkle tail, warm and celebratory, very short.",
+    "event": "achievement"
   }
 ]

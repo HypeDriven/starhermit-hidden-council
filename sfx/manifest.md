@@ -1,6 +1,8 @@
 # SFX manifest — hidden-council
 
 Generated with MOSS-SoundEffect v2.0, 48 kHz mono Opus (96 kbps VBR, loudness-normalized; 100 inference steps).
+`manifest.txt` is the canonical, human-readable manifest (file | event id | description | usage context);
+this table mirrors `manifest.json`, which drives regeneration.
 
 | file | event | prompt |
 |---|---|---|
@@ -16,3 +18,7 @@ Generated with MOSS-SoundEffect v2.0, 48 kHz mono Opus (96 kbps VBR, loudness-no
 | defeat-drone.opus | lose | A low somber descending drone: deep cello and muted horn sinking through three falling notes, quiet and resigned. |
 | vote-token.opus | vote | A small clay token dropped into a wooden bowl: single hollow clack with a brief rattle settling, dry and close. |
 | clock-tick.opus | tick | A single quiet mechanical clock tick: tiny precise snap of an escapement, very short, dry, unobtrusive. |
+| session-start.opus | start | A large clockwork mechanism engaging: a deep winding ratchet followed by a bright brass chime and the whir of gears beginning to turn, ceremonial and warm, no music. |
+| undo-rewind.opus | undo | A short reverse winding sound: a clockwork spring unwinding backwards with a soft tick-tick-tick, dry and mechanical, ending abruptly. |
+| hint-whisper.opus | hint | A soft airy hint cue: a gentle breath of steam through a small brass pipe with a faint rising shimmer, quiet, curious, unobtrusive. |
+| achievement-chime.opus | achievement | A small reward chime: two bright glockenspiel notes rising, with a delicate metallic sparkle tail, warm and celebratory, very short. |

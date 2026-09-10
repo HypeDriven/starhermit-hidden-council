@@ -33,6 +33,15 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; ov
   padding: 28px 32px; max-width: min(560px, 92vw); max-height: 88vh; overflow-y: auto;
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
 }
+.hc-screen-title {
+  background-image: linear-gradient(rgba(19, 21, 32, 0.82), rgba(13, 15, 22, 0.94)), url('./assets/title-keyart.webp');
+  background-size: cover; background-position: center;
+}
+.hc-hero-img {
+  display: block; width: 100%; max-height: 26vh; object-fit: cover;
+  border-radius: 10px; margin: 0 0 12px; border: 1px solid #2c3048;
+}
+.hc-high-contrast .hc-screen-title { background-image: none; }
 .hc-title { margin: 0 0 10px; font-size: 1.8rem; letter-spacing: 0.04em; color: var(--hc-accent); }
 .hc-tagline { color: var(--hc-muted); margin-top: 0; max-width: 70ch; }
 .hc-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
