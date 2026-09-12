@@ -102,6 +102,9 @@ class App {
 
     this.session = new SoloSession(stage, {
       aiDelayMs: this.settings.reducedMotion ? 200 : 450,
+      // Tutorial lessons wait for the required human action before the crew
+      // (and the task clock) moves on, so a lesson can never auto-complete.
+      aiGate: () => !this.tutorial || this.tutorial.step >= this.tutorial.def.steps.length || !!this.tutorial.humanActed,
       onState: (state, events) => this.onState(state, events),
       onReject: (cmd, reason) => this.onReject(reason),
       onEnd: (result) => this.onEnd(result),
@@ -246,6 +249,7 @@ class App {
     const last = this.session.commands.filter((c) => c.player === this.session.humanId).pop();
     if (last && last.type === steps[tut.step].expect) {
       tut.step++;
+      tut.humanActed = false;
       this.audio.event('ack', 5); // 'task' captions "Task complete", which misleads here
       if (tut.step >= steps.length) {
         this.save.tutorialDone[tut.def.id] = true;
@@ -269,6 +273,7 @@ class App {
 
   humanAct(fields) {
     if (!this.session || this.phase !== 'active') return;
+    if (this.tutorial) this.tutorial.humanActed = true;
     this.audio.event('ack', 1);
     if (this.net && this.net.connected) {
       // Hosted on-platform: the host applies locally and broadcasts; guests

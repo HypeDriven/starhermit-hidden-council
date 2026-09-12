@@ -324,11 +324,59 @@ export class StationRenderer {
 
   // ---- camera -----------------------------------------------------------------
 
+  // Distance multiplier so a region `halfW` wide / `halfD` deep fits the
+  // HUD-free part of the canvas (rails on wide layouts, top bar on all).
+  fitScale(halfW, halfD) {
+    const aspect = this.camera.aspect || 1;
+    const tanV = Math.tan((CAM_FRAME.fov * Math.PI / 180) / 2);
+    let freeW = 1, freeH = 0.82;
+    const doc = typeof document !== 'undefined' ? document : null;
+    if (doc && this.canvas.clientWidth) {
+      const W = this.canvas.clientWidth;
+      let l = 0, r = 0;
+      for (const [sel, side] of [['.hc-rail-left', 'l'], ['.hc-rail-right', 'r']]) {
+        const el = doc.querySelector(sel);
+        if (!el) continue;
+        const cs = getComputedStyle(el);
+        if (cs.visibility === 'hidden' || cs.display === 'none' || cs.transform !== 'none') continue;
+        const b = el.getBoundingClientRect();
+        if (b.width < W * 0.4) { if (side === 'l') l = b.width / W; else r = b.width / W; }
+      }
+      freeW = Math.max(0.4, 1 - l - r - 0.04);
+    }
+    // the authored pose is ~48° down; ground depth foreshortens by sin(tilt)
+    const base = Math.hypot(CAM_FRAME.height, CAM_FRAME.dist * 0.55);
+    const needW = halfW / (tanV * aspect * freeW);
+    const needD = halfD * 0.72 / (tanV * freeH);
+    return Math.max(1, needW / base, needD / base);
+  }
+
   placeCamera(roomId, snap) {
     const [x, z] = ROOM_POS[roomId] || [0, 0];
     this.focusRoom = roomId;
+    this.overview = false;
     const look = new THREE.Vector3(x * 0.55, CAM_FRAME.lookY, z * 0.55 + 2.5);
-    const pos = new THREE.Vector3(look.x, CAM_FRAME.height, look.z + CAM_FRAME.dist * 0.55);
+    // the focused room plus its neighbours stay inside the free canvas
+    const k = this.fitScale(6.2, 4.2);
+    const pos = new THREE.Vector3(look.x, CAM_FRAME.height * k, look.z + CAM_FRAME.dist * 0.55 * k);
+    this.moveCamera(pos, look, snap);
+  }
+
+  // Whole-station overview (all rooms in frame); toggled by the Map control.
+  placeOverview(snap) {
+    this.overview = true;
+    const look = new THREE.Vector3(-0.3, CAM_FRAME.lookY, 4.4);
+    const k = this.fitScale(8.4, 6.2) * 1.05;
+    const pos = new THREE.Vector3(look.x, CAM_FRAME.height * k, look.z + CAM_FRAME.dist * 0.55 * k);
+    this.moveCamera(pos, look, snap);
+  }
+
+  toggleOverview() {
+    if (this.overview) this.placeCamera(this.focusRoom || 'core', false); else this.placeOverview(false);
+    return !!this.overview;
+  }
+
+  moveCamera(pos, look, snap) {
     if (snap || this.reducedMotion) {
       this.camera.position.copy(pos);
       this.camera.lookAt(look);
@@ -340,6 +388,10 @@ export class StationRenderer {
   }
 
   resetCamera() { this.placeCamera(this.focusRoom || 'core', false); }
+
+  refitCamera() {
+    if (this.overview) this.placeOverview(true); else this.placeCamera(this.focusRoom || 'core', true);
+  }
 
   // ---- quality ------------------------------------------------------------------
 
@@ -376,6 +428,7 @@ export class StationRenderer {
     this.canvas.style.height = '100%';
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    if (this.focusRoom) this.refitCamera();
   }
 
   rebuild() {

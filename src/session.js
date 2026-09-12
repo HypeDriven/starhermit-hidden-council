@@ -208,6 +208,7 @@ export class SoloSession {
   // (used by skip/fast-forward — settles to the exact deterministic end state).
   stepAi(instant) {
     if (this.over || this.paused) return;
+    if (this.hooks.aiGate && !this.hooks.aiGate()) { if (!instant) this.scheduleAi(); return; }
     let guard = 0;
     do {
       const st = this.state;

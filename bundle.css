@@ -102,13 +102,13 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; ov
 .hc-lobby ul { padding-left: 18px; }
 
 /* HUD */
-.hc-hud { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+.hc-hud { position: absolute; inset: 0; pointer-events: none; z-index: 10; overflow: hidden; }
 .hc-hud > * { pointer-events: auto; }
 .hc-topbar {
   position: absolute; top: calc(8px + var(--safe-top)); left: calc(12px + var(--safe-left)); right: calc(12px + var(--safe-right));
   display: flex; align-items: center; gap: 14px;
 }
-.hc-caption { color: var(--hc-accent); font-size: 0.95rem; text-shadow: 0 1px 4px #000; }
+.hc-caption { color: var(--hc-accent); font-size: 0.95rem; text-shadow: 0 1px 4px #000; flex: 1 1 auto; min-width: 0; }
 .hc-rail {
   position: absolute; top: 70px; bottom: calc(16px + var(--safe-bottom)); width: 240px;
   background: rgba(20, 23, 36, 0.82); border: 1px solid #2c3048; border-radius: 12px;
@@ -134,19 +134,23 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; ov
 .hc-high-contrast .hc-rail { background: rgba(0, 0, 0, 0.92); }
 .hc-reduced-motion .btn { transition: none; }
 
-/* Compact desktop / tablet: rails become drawers */
+.hc-drawer-toggle { display: none; min-height: 44px; min-width: 44px; }
+
+/* Compact desktop / tablet: rails become drawers with explicit labelled toggles */
 @media (max-width: 1023px) {
-  .hc-rail { width: 210px; top: 64px; }
-  .hc-rail-left { transform: translateX(calc(-100% + 42px)); transition: transform 0.2s ease; }
-  .hc-rail-right { transform: translateX(calc(100% - 42px)); transition: transform 0.2s ease; }
-  .hc-rail:hover, .hc-rail:focus-within { transform: none; }
+  .hc-drawer-toggle { display: inline-flex; }
+  .hc-rail { width: 240px; top: 64px; transition: transform 0.2s ease, visibility 0.2s; visibility: hidden; }
+  .hc-rail-left { transform: translateX(calc(-100% - 16px)); }
+  .hc-rail-right { transform: translateX(calc(100% + 16px)); }
+  .hc-rail.open { transform: none; visibility: visible; }
 }
 
 /* Portrait mobile: top status bar + bottom thumb-zone tray */
 @media (max-width: 700px) and (orientation: portrait) {
   .hc-rail { top: auto; bottom: calc(8px + var(--safe-bottom)); width: auto; left: calc(8px + var(--safe-left)); right: calc(8px + var(--safe-right)); max-height: 38vh; }
-  .hc-rail-left { max-height: 24vh; bottom: auto; top: 60px; transform: none; }
-  .hc-rail-right { transform: none; }
+  .hc-rail-left { max-height: 24vh; bottom: auto; top: 60px; transform: none; visibility: visible; }
+  .hc-rail-right { transform: none; visibility: visible; }
+  .hc-drawer-toggle { display: none; }
   .hc-actions { flex-direction: row; flex-wrap: wrap; }
   .hc-action { flex: 1 1 45%; }
   .hc-screen { padding: 18px; max-height: 92vh; }
@@ -154,7 +158,7 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; ov
 
 /* Landscape mobile: narrow rail */
 @media (max-height: 500px) and (orientation: landscape) {
-  .hc-rail { width: 180px; top: 54px; bottom: calc(8px + var(--safe-bottom)); padding: 8px; font-size: 0.85rem; }
+  .hc-rail { width: 220px; top: 54px; bottom: calc(8px + var(--safe-bottom)); padding: 8px; font-size: 0.85rem; }
   .btn { min-height: 44px; padding: 6px 12px; }
   .hc-screen { max-height: 94vh; padding: 14px 18px; }
 }

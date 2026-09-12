@@ -75,7 +75,27 @@ export class UI {
 
     const pauseBtn = this.button('⏸ Pause', 'hc-pause', () => this.app.pauseGame());
     pauseBtn.setAttribute('aria-keyshortcuts', 'Escape');
-    this.hudTop.append(pauseBtn, this.el('span', 'hc-caption'));
+    // Compact layouts: labelled 44px drawer controls (CSS shows them only there).
+    const drawerBtn = (label, rail, other) => {
+      const b = this.button(label, 'hc-drawer-toggle', () => {
+        const open = rail.classList.toggle('open');
+        other.classList.remove('open');
+        b.setAttribute('aria-expanded', String(open));
+      });
+      b.setAttribute('aria-expanded', 'false');
+      return b;
+    };
+    this.drawerLeftBtn = drawerBtn('☰ Log', this.hudLeft, this.hudRight);
+    this.drawerRightBtn = drawerBtn('Actions ▸', this.hudRight, this.hudLeft);
+    const mapBtn = this.button('⌖ Map', 'hc-map', () => {
+      const r = this.app.renderer;
+      if (!r) return;
+      const on = r.toggleOverview();
+      mapBtn.setAttribute('aria-pressed', String(on));
+    });
+    mapBtn.setAttribute('aria-pressed', 'false');
+    mapBtn.title = 'Toggle station overview / room view';
+    this.hudTop.append(pauseBtn, mapBtn, this.drawerLeftBtn, this.el('span', 'hc-caption'), this.drawerRightBtn);
     this.captionEl = this.hudTop.querySelector('.hc-caption');
 
     this.hud.append(this.hudTop, this.hudLeft, this.hudRight);
