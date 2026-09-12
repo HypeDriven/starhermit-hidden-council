@@ -181,12 +181,22 @@ export class UI {
     );
     s.appendChild(row);
     const prof = this.el('div', 'hc-profile');
-    const name = this.el('input', 'hc-name');
-    name.value = save.profile.name;
-    name.maxLength = 24;
-    name.setAttribute('aria-label', 'Display name');
-    name.addEventListener('change', () => { save.profile.name = name.value.trim() || save.profile.name; this.app.persistSave(); });
-    prof.append(this.el('label', '', 'Tinkerer: '), name, this.el('span', 'hc-muted', ` · ${save.sessions} sessions · streak ${save.streak}`));
+    if (this.app.platform && this.app.platform.hosted) {
+      // Hosted: the name comes from the platform profile, not a free-text box.
+      prof.append(
+        this.el('label', '', 'Tinkerer: '),
+        this.el('strong', '', this.app.platform.displayName || '…'),
+        this.el('span', 'hc-muted', ` · ${save.sessions} sessions · streak ${save.streak}`),
+        this.el('span', 'hc-sync', this.app.platform.syncLine()),
+      );
+    } else {
+      const name = this.el('input', 'hc-name');
+      name.value = save.profile.name;
+      name.maxLength = 24;
+      name.setAttribute('aria-label', 'Display name');
+      name.addEventListener('change', () => { save.profile.name = name.value.trim() || save.profile.name; this.app.persistSave(); });
+      prof.append(this.el('label', '', 'Tinkerer: '), name, this.el('span', 'hc-muted', ` · ${save.sessions} sessions · streak ${save.streak}`));
+    }
     s.appendChild(prof);
     const settingsBtn = this.button('⚙ Settings', 'hc-subtle', () => this.showScreen(this.settingsScreen()));
     s.appendChild(settingsBtn);
@@ -198,7 +208,7 @@ export class UI {
     const modes = [
       ['Tutorial', 'Learn one rule at a time.', () => this.showScreen(this.tutorialScreen())],
       ['Journey', '40 staged councils, growing pressure.', () => this.showScreen(this.journeyScreen(this.app.save))],
-      ['Daily Chime', 'One shared seed per UTC day. Ranked.', () => this.app.startDaily()],
+      ['Daily Chime', 'One shared seed per UTC day.', () => this.app.startDaily()],
       ['Practice', 'Any difficulty. Undo allowed. Unranked.', () => this.showScreen(this.practiceScreen())],
       ['Challenge', 'Constrained goals: beat the clock, sure-footed.', () => this.showScreen(this.challengeScreen())],
       ['Hosted Play', 'Create or join a room with others.', () => this.showScreen(this.hostedScreen())],
@@ -224,8 +234,9 @@ export class UI {
       ['Players', stage.config.playerCount + ' (' + stage.config.saboteurCount + ' saboteur' + (stage.config.saboteurCount > 1 ? 's' : '') + ')'],
       ['Par', stage.par + ' ticks'],
       ['Difficulty', '★'.repeat(stage.difficulty)],
-      ['Ranked', stage.ranked ? 'Yes' : 'No'],
-    ];
+      ['Ranked', stage.ranked
+        ? ((this.app.platform && this.app.platform.hosted) ? 'Yes — shown on the read-only platform board' : 'Yes')
+        : 'No'],    ];
     for (const [k, v] of items) {
       const li = this.el('li', '', k + ': ');
       li.appendChild(this.el('strong', '', v));
@@ -291,16 +302,23 @@ export class UI {
   }
 
   hostedScreen() {
+    const hosted = this.app.platform && this.app.platform.hosted;
     const s = this.screen('Hosted Play');
-    s.appendChild(this.el('p', 'hc-muted', 'Create a private room or quick-join. Works when served by server.js.'));
+    s.appendChild(this.el('p', 'hc-muted', hosted
+      ? 'Create a council or quick-join an open one. The room is routed by StarHermit; the tab that creates it runs the station.'
+      : 'Create a private room or quick-join. Works when served by server.js.'));
     s.appendChild(this.button('Create Room', 'hc-mode', () => this.app.hostedCreate()));
     s.appendChild(this.button('Quick Join', 'hc-mode', () => this.app.hostedQuickJoin()));
-    const row = this.el('div', 'hc-row');
-    const code = this.el('input', 'hc-name');
-    code.placeholder = 'ROOM CODE'; code.maxLength = 6;
-    code.setAttribute('aria-label', 'Room code');
-    row.append(code, this.button('Join', '', () => this.app.hostedJoin(code.value)));
-    s.appendChild(row);
+    if (hosted) {
+      s.appendChild(this.el('p', 'hc-muted', 'Room codes are a local-play feature — on-platform, others join with Quick Join.'));
+    } else {
+      const row = this.el('div', 'hc-row');
+      const code = this.el('input', 'hc-name');
+      code.placeholder = 'ROOM CODE'; code.maxLength = 6;
+      code.setAttribute('aria-label', 'Room code');
+      row.append(code, this.button('Join', '', () => this.app.hostedJoin(code.value)));
+      s.appendChild(row);
+    }
     this.lobbyEl = this.el('div', 'hc-lobby');
     s.appendChild(this.lobbyEl);
     s.appendChild(this.button('← Back', 'hc-subtle', () => this.app.showModeSelect()));
@@ -313,14 +331,28 @@ export class UI {
     this.lobbyEl.appendChild(this.el('h2', '', 'Room ' + snapshot.code));
     const ul = this.el('ul');
     for (const seat of snapshot.seats) {
-      ul.appendChild(this.el('li', '', `${seat.name}${seat.ai ? ' (automaton)' : ''}${seat.ready ? ' — ready' : ''}${seat.id === snapshot.you ? ' ← you' : ''}`));
+      ul.appendChild(this.el('li', '', `${seat.name}${seat.ai ? ' (automaton)' : ''}${seat.ready ? ' — ready' : ''}${seat.id === snapshot.you || seat.you ? ' ← you' : ''}`));
     }
     this.lobbyEl.appendChild(ul);
-    this.lobbyEl.append(
-      this.button('Add Automaton', '', () => this.app.hostedAddAi()),
-      this.button('Ready', '', () => this.app.hostedReady()),
-      this.button('Start', 'hc-play', () => this.app.hostedStart()),
-    );
+    const net = this.app.net;
+    if (net) {
+      // Platform rooms: only the host adds automata / starts; anyone may leave.
+      if (net.isHost) {
+        this.lobbyEl.append(
+          this.button('Add Automaton', '', () => this.app.hostedAddAi()),
+          this.button('Start', 'hc-play', () => this.app.hostedStart()),
+        );
+      } else {
+        this.lobbyEl.appendChild(this.button('Ready', '', () => this.app.hostedReady()));
+      }
+      this.lobbyEl.appendChild(this.button('Leave Room', 'hc-subtle', () => this.app.hostedLeave()));
+    } else {
+      this.lobbyEl.append(
+        this.button('Add Automaton', '', () => this.app.hostedAddAi()),
+        this.button('Ready', '', () => this.app.hostedReady()),
+        this.button('Start', 'hc-play', () => this.app.hostedStart()),
+      );
+    }
   }
 
   pauseScreen() {
@@ -424,6 +456,22 @@ export class UI {
       const ul = this.el('ul', 'hc-achievements');
       for (const k of freshAchievements) ul.appendChild(this.el('li', '', '🏅 ' + k.replace(/_/g, ' ')));
       s.appendChild(ul);
+    }
+    if (meta && meta.leaderboard === 'loading') {
+      s.appendChild(this.el('p', 'hc-muted', 'Loading the global board…'));
+    } else if (meta && meta.leaderboard && !meta.leaderboard.leaderboardId) {
+      s.appendChild(this.el('p', 'hc-muted', 'No platform leaderboard for this game — your personal bests travel with your save.'));
+    } else if (meta && meta.leaderboard) {
+      s.appendChild(this.el('h2', '', 'Global board'));
+      const ol = this.el('ol', 'hc-board');
+      for (const e of meta.leaderboard.entries) {
+        ol.appendChild(this.el('li', e.you ? 'hc-you' : '',
+          `${e.rank != null ? e.rank + '. ' : ''}${e.name} — ${formatScore(e.score)}${e.you ? ' (you)' : ''}`));
+      }
+      if (!meta.leaderboard.entries.length) ol.appendChild(this.el('li', '', 'No entries yet.'));
+      s.appendChild(ol);
+    } else if (meta && meta.leaderboard === null) {
+      s.appendChild(this.el('p', 'hc-muted', 'Global board unavailable (offline).'));
     }
     if (meta && meta.leaderboardError) s.appendChild(this.el('p', 'hc-muted', 'Leaderboard: ' + meta.leaderboardError));
 

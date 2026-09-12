@@ -47,6 +47,10 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; ov
 .hc-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
 .hc-muted { color: var(--hc-muted); font-size: 0.9rem; }
 .hc-profile { margin-top: 18px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hc-sync { font-size: 0.85rem; color: var(--hc-muted); border: 1px solid #3a4060; border-radius: 999px; padding: 2px 10px; }
+.hc-board { margin: 8px 0 14px; padding-left: 24px; }
+.hc-board li { padding: 2px 0; }
+.hc-board li.hc-you { color: var(--hc-accent); font-weight: 600; }
 
 /* Buttons — ≥44px touch targets */
 .btn {

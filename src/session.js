@@ -25,6 +25,15 @@ function checksum(obj) {
   return hashStr(JSON.stringify(obj));
 }
 
+/** The versioned+checksummed envelope the local cache and the cloud slot share. */
+export function saveChecksum(data) {
+  return checksum(data);
+}
+
+export function wrapSave(data) {
+  return { v: 1, data, sum: checksum(data) };
+}
+
 export function loadSave() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
@@ -50,8 +59,7 @@ function defaultSave() {
 }
 
 export function storeSave(data) {
-  const doc = { v: 1, data, sum: checksum(data) };
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(doc)); } catch (e) { /* full/blocked */ }
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(wrapSave(data))); } catch (e) { /* full/blocked */ }
 }
 
 // Merge two snapshots: keep the one with strictly more progress; otherwise
@@ -107,14 +115,17 @@ export function unlockAchievements(save, keys) {
 // Server time sync
 // ---------------------------------------------------------------------------
 
-export async function syncServerTime() {
+export async function syncServerTime(token) {
   try {
     const t0 = Date.now();
-    const res = await fetch('/api/v1/time');
+    const headers = token ? { authorization: `Bearer ${token}` } : {};
+    const res = await fetch('/api/v1/time', { headers, cache: 'no-store' });
+    if (!res.ok) throw new Error(String(res.status));
     const body = await res.json();
     const t1 = Date.now();
-    if (typeof body.now === 'number') {
-      return { offset: body.now - Math.round((t0 + t1) / 2), rtt: t1 - t0, ok: true };
+    const serverNow = typeof body.now === 'number' ? body.now : body.serverTime;
+    if (typeof serverNow === 'number') {
+      return { offset: serverNow - Math.round((t0 + t1) / 2), rtt: t1 - t0, ok: true };
     }
   } catch (e) { /* offline: local clock */ }
   return { offset: 0, rtt: 0, ok: false };

@@ -382,6 +382,291 @@ async function main() {
     assert(bad.problems.length >= 3);
   });
 
+  // ---------------------------------------------------------- platform --
+
+  const platform = await import('../src/platform.js');
+  const netMod = await import('../src/net.js');
+
+  const jwtFor = (claims) => `e30.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.sig`;
+
+  const withFetch = async (handler, fn) => {
+    const real = globalThis.fetch;
+    const calls = [];
+    globalThis.fetch = (url, opts) => { calls.push({ url: String(url), opts: opts || {} }); return handler(String(url), opts || {}); };
+    try { return await fn(calls); } finally { globalThis.fetch = real; }
+  };
+
+  const jsonRes = (obj, status) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => obj,
+    arrayBuffer: async () => {
+      const s = Buffer.from(obj.__b64 || '', 'base64').toString('binary');
+      const b = new Uint8Array(s.length);
+      for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+      return b.buffer;
+    },
+  });
+
+  await test('platform: zip round-trips through the stored-zip helper', () => {
+    const { zipStore, unzipFirstEntry, bytesToBase64, base64ToBytes } = platform._zip;
+    const json = JSON.stringify({ journey: { 'journey-1': { score: 42, won: true } }, sessions: 7 });
+    const data = new TextEncoder().encode(json);
+    const zip = zipStore('save.json', data);
+    const back = unzipFirstEntry(zip);
+    assert.strictEqual(new TextDecoder().decode(back), json);
+    const again = unzipFirstEntry(base64ToBytes(bytesToBase64(zip)));
+    assert.strictEqual(new TextDecoder().decode(again), json);
+  });
+
+  await test('platform: JWT payload decodes sub + game_scope', () => {
+    const claims = platform._zip.decodeJwtPayload(jwtFor({ sub: 'user-123', game_scope: 'hidden-council', exp: 1 }));
+    assert.strictEqual(claims.sub, 'user-123');
+    assert.strictEqual(claims.game_scope, 'hidden-council');
+    assert.strictEqual(platform._zip.decodeJwtPayload('not-a-jwt'), null);
+  });
+
+  await test('platform: fragment token read once + stripped; query fallback for dev', () => {
+    const savedLoc = globalThis.location, savedHist = globalThis.history;
+    let replaced = null;
+    try {
+      globalThis.location = { hash: '#game_token=TOK&session_id=abc', search: '', pathname: '/' };
+      globalThis.history = { replaceState: (n, t, url) => { replaced = url; } };
+      const p1 = new platform.Platform();
+      assert.strictEqual(p1.token, 'TOK');
+      assert.strictEqual(replaced, '/');
+      globalThis.location = { hash: '', search: '', pathname: '/' };
+      const p2 = new platform.Platform();
+      assert.strictEqual(p2.token, null);
+      globalThis.location = { hash: '', search: '?token=QTOK', pathname: '/' };
+      const p3 = new platform.Platform();
+      assert.strictEqual(p3.token, 'QTOK');
+    } finally {
+      if (savedLoc === undefined) delete globalThis.location; else globalThis.location = savedLoc;
+      if (savedHist === undefined) delete globalThis.history; else globalThis.history = savedHist;
+    }
+  });
+
+  await test('platform: api() sends Authorization: Bearer on every call', async () => {
+    await withFetch(async () => jsonRes({ ok: true }, 200), async (calls) => {
+      const p = new platform.Platform();
+      p.token = 'tk';
+      await p.api('/api/v1/anything', { method: 'POST', body: '{}' });
+      assert.strictEqual(calls.length, 1);
+      assert.strictEqual(calls[0].opts.headers.authorization, 'Bearer tk');
+      assert.strictEqual(calls[0].opts.headers['content-type'], 'application/json');
+    });
+  });
+
+  await test('platform: refresh swaps the token via games/{slug}/launch-token', async () => {
+    await withFetch(async (url) => {
+      assert(url.includes('/api/v1/games/hidden-council/launch-token'));
+      return jsonRes({ token: 'fresh-token' }, 200);
+    }, async () => {
+      const p = new platform.Platform();
+      p.token = 'stale'; p.gameSlug = 'hidden-council';
+      clearTimeout(p._refreshTimer);
+      await p.refreshToken();
+      assert.strictEqual(p.token, 'fresh-token');
+    });
+  });
+
+  await test('platform: nickname from users/{id}/profile, Player-id8 fallback, never username', async () => {
+    await withFetch(async (url) => {
+      if (url.includes('/users/u1/profile')) return jsonRes({ id: 'u1', username: 'ada_lovelace', nickname: 'Ada' }, 200);
+      return jsonRes({ error: 'not found' }, 404);
+    }, async () => {
+      const p = new platform.Platform();
+      p.token = 'tk';
+      assert.strictEqual(await p.profileFor('u1'), 'Ada');       // nickname, not username
+      assert.strictEqual(await p.profileFor('u2'), 'Player u2'); // 404 -> fallback
+      assert.strictEqual(p.displayName, null);
+      p.sub = 'u1';
+      await p.fetchProfile();
+      assert.strictEqual(p.displayName, 'Ada');
+    });
+  });
+
+  await test('platform: cloud save pushes zip+base64 (doc survives the round trip)', async () => {
+    const doc = { v: 1, data: { sessions: 3 }, sum: 123 };
+    let pushed = null;
+    await withFetch(async (url, opts) => {
+      if (opts.method === 'PUT') {
+        pushed = JSON.parse(opts.body);
+        return jsonRes({ ok: true }, 200);
+      }
+      return jsonRes({ error: 'x' }, 404);
+    }, async () => {
+      const p = new platform.Platform();
+      p.token = 'tk'; p.gameSlug = 'hidden-council';
+      p.syncSave(doc);
+      clearTimeout(p._cloudTimer);           // skip the debounce
+      await p._pushCloudSave(false);
+      assert(pushed && typeof pushed.dataBase64 === 'string');
+      const zipBytes = platform._zip.base64ToBytes(pushed.dataBase64);
+      const back = JSON.parse(new TextDecoder().decode(platform._zip.unzipFirstEntry(zipBytes)));
+      assert.deepStrictEqual(back, doc);
+      assert.strictEqual(p.syncStatus, 'synced');
+    });
+  });
+
+  await test('platform: syncSave debounces (saving, no immediate PUT); 404 load = none', async () => {
+    let putCount = 0;
+    await withFetch(async (url, opts) => {
+      if (opts.method === 'PUT') { putCount++; return jsonRes({ ok: true }, 200); }
+      return jsonRes({ error: 'none' }, 404);
+    }, async () => {
+      const p = new platform.Platform();
+      p.token = 'tk'; p.gameSlug = 'hidden-council';
+      p.syncSave({ v: 1, data: {}, sum: 1 });
+      assert.strictEqual(p.syncStatus, 'saving');
+      assert.strictEqual(putCount, 0);            // debounced, not yet pushed
+      clearTimeout(p._cloudTimer);
+      await p._pushCloudSave(false);
+      assert.strictEqual(putCount, 1);
+      assert.strictEqual(await p.cloudLoad(), null); // 404 = no remote save
+    });
+  });
+
+  // --- RoomsClient (mocked platform + WebSocket) ------------------------------
+
+  const makeWsMock = () => {
+    const sent = [];
+    const ws = {
+      url: null, readyState: 1, binaryType: 'arraybuffer',
+      onopen: null, onerror: null, onclose: null, onmessage: null,
+      send(d) { sent.push(d); },
+      close() { this.readyState = 3; },
+    };
+    return { ws, sent };
+  };
+
+  const makeNetPlatform = () => ({
+    token: 'tk', gameSlug: 'hidden-council', sub: 'host-user',
+    displayName: 'Host',
+    api: async (path, opts) => globalThis.fetch(path, opts),
+    profileFor: async (id) => `Player ${String(id).slice(0, 8)}`,
+  });
+
+  const withWs = async (fn) => {
+    const saved = globalThis.WebSocket;
+    const savedLoc = globalThis.location;
+    const mock = makeWsMock();
+    globalThis.WebSocket = function (url) {
+      mock.ws.url = url;
+      return mock.ws;
+    };
+    if (globalThis.location === undefined) globalThis.location = { protocol: 'http:', host: 'localhost' };
+    try { return await fn(mock); } finally {
+      globalThis.WebSocket = saved;
+      if (savedLoc === undefined) delete globalThis.location; else globalThis.location = savedLoc;
+    }
+  };
+
+  await test('rooms: create -> REST create+open, ws URL carries roomId + access_token', async () => {
+    await withFetch(async (url, opts) => {
+      if (url.endsWith('/api/v1/realtime/rooms') && opts.method === 'POST') return jsonRes({ id: 'room-1' }, 200);
+      if (url.includes('/open')) return jsonRes({ ok: true }, 200);
+      return jsonRes({ error: 'x' }, 404);
+    }, async () => {
+      await withWs(async (mock) => {
+        const msgs = [];
+        const net = new netMod.RoomsClient(makeNetPlatform(), { onMessage: (m) => msgs.push(m), onCaption: () => {} });
+        const p = net.createRoom();
+        await waitFor(() => typeof mock.ws.onopen === 'function');  // REST first, then the socket
+        mock.ws.onopen();
+        await p;
+        assert(net.isHost && net.connected);
+        assert(mock.ws.url.includes('/ws/v1/realtime?roomId=room-1&access_token=tk'));
+        const roomMsg = msgs.find((m) => m.type === 'room');
+        assert(roomMsg && roomMsg.seats.length === 1 && roomMsg.seats[0].id === 'seat:host');
+        assert.strictEqual(roomMsg.you, 'seat:host');
+        net.leave();
+      });
+    });
+  });
+
+  await test('rooms: quick-join 404 is honest (no room, captioned)', async () => {
+    await withFetch(async () => jsonRes({ error: 'none open' }, 404), async () => {
+      const caps = [];
+      const net = new netMod.RoomsClient(makeNetPlatform(), { onCaption: (t) => caps.push(t) });
+      const ok = await net.quickJoin();
+      assert.strictEqual(ok, false);
+      assert.strictEqual(net.room, null);
+      assert(caps.some((c) => /No open councils/.test(c)));
+    });
+  });
+
+  await test('rooms: guest commands ride as binary JSON; host applies them with prefix stripped', () => {
+    const plat = makeNetPlatform();
+    const { ws, sent } = makeWsMock();
+    const net = new netMod.RoomsClient(plat, { onMessage: () => {}, onCaption: () => {} });
+    net.room = 'room-9'; net.isHost = false; net.connected = true; net.ws = ws;
+    net.sendCommand({ id: 'c1', type: 'wait', player: 'p1' });
+    const frame = sent[0];
+    assert(frame instanceof Uint8Array);
+    const msg = JSON.parse(new TextDecoder().decode(frame));
+    assert.strictEqual(msg.type, 'command');
+    assert.strictEqual(msg.command.type, 'wait');
+    // Host side: the same frame arrives prefixed with the 16-byte sender id.
+    const host = new netMod.RoomsClient(plat, { onMessage: () => {}, onCaption: () => {} });
+    host.room = 'room-9'; host.isHost = true; host.connected = true; host.ws = makeWsMock().ws;
+    host.sim = { commit: (cmd) => { host.__cmd = cmd; return { ok: true }; }, stopAi: () => {} };
+    const prefixed = new Uint8Array(16 + frame.length);
+    prefixed.set(frame, 16);
+    host._onMessage({ data: prefixed.buffer });
+    assert.deepStrictEqual(host.__cmd, { id: 'c1', type: 'wait', player: 'p1' });
+  });
+
+  await test('rooms: started message resolves the guest\'s own seat by sub', () => {
+    const plat = makeNetPlatform();
+    plat.sub = 'guest-user';
+    const net = new netMod.RoomsClient(plat, { onMessage: () => {}, onCaption: () => {} });
+    const msg = {
+      type: 'started',
+      state: { seed: 5, players: [{}, {}], tasks: [] },
+      seats: [
+        { id: 'seat:host', name: 'Host', playerId: 'p0', userId: 'host-user' },
+        { id: 'seat:aa', name: 'Guest', playerId: 'p1', userId: 'guest-user' },
+      ],
+    };
+    net._onGuestGameMsg(msg);
+    assert.strictEqual(msg.you, 'seat:aa');
+    assert(msg.seats[1].you && !msg.seats[0].you);
+  });
+
+  await test('rooms: wire state trims the log so frames stay under the 8 KB cap', () => {
+    const plat = makeNetPlatform();
+    const { ws, sent } = makeWsMock();
+    const net = new netMod.RoomsClient(plat, { onMessage: () => {}, onCaption: () => {} });
+    net.room = 'r'; net.isHost = true; net.connected = true; net.ws = ws;
+    net.sim = {
+      state: { seed: 1, log: Array.from({ length: 200 }, (_, i) => ({ tick: i, kind: 'wait', text: 'padding text padding text padding text' })) },
+      stopAi: () => {},
+    };
+    net._broadcastState();
+    const frame = sent[0];
+    assert(frame instanceof Uint8Array);
+    assert(frame.byteLength <= 8192, 'frame over cap: ' + frame.byteLength);
+    const msg = JSON.parse(new TextDecoder().decode(frame));
+    assert.strictEqual(msg.type, 'state');
+    assert(msg.state.log.length <= 16);
+  });
+
+  await test('rooms: host_left is emitted when the roster empties after a guest saw the host', async () => {
+    const plat = makeNetPlatform();
+    plat.sub = 'guest-user';
+    const msgs = [];
+    const net = new netMod.RoomsClient(plat, { onMessage: (m) => msgs.push(m), onCaption: () => {} });
+    net.room = 'room-x'; net.isHost = false;
+    await net._onRoster([{ id: 'p-host', userId: 'host-user', host: true }, { id: 'p-guest', userId: 'guest-user' }]);
+    assert.strictEqual(net._hostParticipantId, 'p-host');
+    let leftCalled = false;
+    net.leave = () => { leftCalled = true; };
+    await net._onRoster([{ id: 'p-guest', userId: 'guest-user' }]);   // host gone, guest remains
+    assert(leftCalled && msgs.some((m) => m.type === 'host_left'));
+  });
+
   // ---------------------------------------------------------- server --
 
   const { server, ready } = require('../server.js');

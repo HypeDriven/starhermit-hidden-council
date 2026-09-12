@@ -7,14 +7,17 @@ import { StationRenderer, ROOM_POS, LAYER_GAME } from './render.js';
 import { UI } from './ui.js';
 import { AudioEngine } from './audio.js';
 import {
-  SoloSession, loadSave, storeSave, loadSettings, storeSettings, syncServerTime, ACHIEVEMENTS,
+  SoloSession, loadSave, storeSave, loadSettings, storeSettings, syncServerTime, mergeSaves, saveChecksum, ACHIEVEMENTS,
 } from './session.js';
+import { Platform } from './platform.js';
+import { RoomsClient } from './net.js';
 import { legalActions, STATION_ROOMS } from './rules.js';
 import { THEMES, dailyStage, practiceStage, challengeStage, JOURNEY } from './content.js';
 
 class App {
   constructor(root) {
     this.phase = 'boot';
+    this.platform = new Platform();
     this.save = loadSave();
     this.settings = loadSettings();
     this.ui = new UI(root, this);
@@ -24,17 +27,34 @@ class App {
     this.session = null;
     this.stage = null;
     this.serverOffset = 0;
-    this.ws = null;
+    this.ws = null;          // legacy dev server (server.js) socket, no-token path
+    this.net = null;         // RoomsClient while a platform room is active
+    this.hostedSeatId = null;
     this.focusIndex = 0;
 
     this.applyAccessibilityClasses();
     this.bindGlobalInput();
     this.bindLifecycle();
 
-    syncServerTime().then((r) => { this.serverOffset = r.offset; });
+    syncServerTime(this.platform.token).then((r) => { this.serverOffset = r.offset; });
+
+    if (this.platform.hosted) this.initHosted();
 
     if (this.webglAvailable()) this.phase = 'title';
     this.showTitle();
+  }
+
+  /** Boot handshake for hosted mode: remote save wins on conflict. */
+  initHosted() {
+    this.platform.onSync = () => { if (this.phase === 'title') this.showTitle(); };
+    return this.platform.initHosted().then((remoteDoc) => {
+      if (remoteDoc) {
+        this.save = mergeSaves(remoteDoc.data, loadSave());
+      }
+      if (this.platform.displayName) this.save.profile.name = this.platform.displayName;
+      this.persistSave();   // rewrite the local cache (+ cloud mirror when merged)
+      if (this.phase === 'title') this.showTitle();
+    });
   }
 
   webglAvailable() {
@@ -44,7 +64,15 @@ class App {
     } catch (e) { return false; }
   }
 
-  persistSave() { storeSave(this.save); }
+  persistSave() {
+    storeSave(this.save);
+    this.platform.syncSave({ v: 1, data: this.save, sum: saveChecksum(this.save) });
+  }
+
+  /** True while any authoritative hosted session is live (legacy or rooms). */
+  hostedActive() {
+    return (this.ws && this.ws.readyState === 1) || !!(this.net && this.net.inGame);
+  }
 
   // ------------------------------------------------------------- screens --
 
@@ -178,8 +206,10 @@ class App {
   }
 
   leaveGame() {
+    this.hostedSession = false;
     if (this.session) { this.session.pause(); this.session = null; }
     if (this.ws) { try { this.ws.close(); } catch (e) {} this.ws = null; }
+    if (this.net) { this.net.leave(); this.net = null; }
     this.showTitle();
   }
 
@@ -240,8 +270,15 @@ class App {
   humanAct(fields) {
     if (!this.session || this.phase !== 'active') return;
     this.audio.event('ack', 1);
+    if (this.net && this.net.connected) {
+      // Hosted on-platform: the host applies locally and broadcasts; guests
+      // send their existing command message to the host (binary JSON).
+      if (this.net.isHost) this.session.act(fields);
+      else this.net.sendCommand(this.session.makeCmd(fields));
+      return;
+    }
     if (this.ws && this.ws.readyState === 1) {
-      // Hosted: send to authoritative server.
+      // Hosted on the dev server: send to authoritative server.
       const cmd = this.session.makeCmd(fields);
       this.ws.send(JSON.stringify({ type: 'command', command: cmd }));
       return;
@@ -278,9 +315,24 @@ class App {
   onEnd(result) {
     this.phase = 'resolving';
     const won = !!result.playerWon;
-    if (this.session && !this.ws) {
+    if (this.session && !this.hostedSession) {
       const fresh = this.session.recordCompletion(this.save);
       this.persistSave();
+      if (this.platform.hosted) {
+        // On-platform there is nothing to submit: clients can never post
+        // scores. Personal bests live in the cloud-mirrored save; the global
+        // board is read-only and rendered once it resolves.
+        this.phase = 'results';
+        this.audio.event(won ? 'win' : 'lose', 9);
+        if (fresh && fresh.length) setTimeout(() => this.audio.event('achievement', 11), 700);
+        this.ui.showScreen(this.ui.resultsScreen(result, this.stage, fresh, { leaderboard: 'loading' }));
+        this.platform.fetchPlatformLeaderboard().then((lb) => {
+          if (this.phase !== 'results') return;
+          const meta = lb && lb.entries && lb.entries.length ? { leaderboard: lb } : { leaderboard: null };
+          this.ui.showScreen(this.ui.resultsScreen(result, this.stage, [], meta));
+        });
+        return;
+      }
       this.submitScore(result, (err) => {
         this.phase = 'results';
         this.audio.event(won ? 'win' : 'lose', 9);
@@ -311,6 +363,65 @@ class App {
 
   // ------------------------------------------------------------- hosted --
 
+  /** Platform-room message handler: same message shapes as the dev server. */
+  onHostedMessage(msg) {
+    if (!msg || typeof msg.type !== 'string') return;
+    if (msg.type === 'room') {
+      if (msg.you) this.hostedSeatId = msg.you; // remember which seat is ours
+      this.ui.updateLobby(msg);
+    }
+    if (msg.type === 'started') {
+      this.stage = { id: 'hosted', name: 'Hosted Council', seed: msg.state.seed, config: msg.state, goals: { tasks: msg.state.tasks.length }, par: 80, difficulty: 3, theme: this.settings.theme };
+      this.hostedSession = true;
+      if (this.net && this.net.isHost && this.net.sim) {
+        // The host's UI session IS the authority running in this tab.
+        this.session = this.net.sim;
+      } else {
+        this.session = new SoloSession({ id: 'hosted', seed: msg.state.seed, config: { seed: msg.state.seed, playerCount: msg.state.players.length, saboteurCount: 1, taskCount: msg.state.tasks.length } }, {
+          onState: (s, e) => this.onState(s, e), onReject: (reason) => this.onReject(reason), onEnd: (result) => this.onEnd(result),
+        });
+        this.session.stopAi();
+      }
+      // Our seat is rarely p0 in a hosted room: commands must carry our own
+      // player id or the authority rejects them as identity_mismatch.
+      const mine = (msg.seats || []).find((s) => s.you)
+        || (msg.seats || []).find((s) => s.id === this.hostedSeatId);
+      this.session.humanId = mine && mine.playerId ? mine.playerId : 'p0';
+      this.ui.showScreen(null);
+      this.buildRenderer(this.stage);
+      this.phase = 'active';
+      this.ui.showHud(true);
+      this.applyHostedState(msg.state, ['The session begins.']);
+    }
+    if (msg.type === 'state') this.applyHostedState(msg.state, []);
+    if (msg.type === 'snapshot') {
+      this.applyHostedState(msg.state, msg.away && msg.away.length ? ['While you were away:'].concat(msg.away) : []);
+    }
+    if (msg.type === 'rejected') this.onReject(msg.reason);
+    if (msg.type === 'results') {
+      this.applyHostedState(msg.state, []);
+      // The host's authority session reports through its own hooks; make sure
+      // the results screen still opens for every seat.
+      if (this.phase !== 'results' && this.session) this.onEnd(this.session.result());
+    }
+    if (msg.type === 'host_left') {
+      this.ui.caption('The host left — the session has ended.');
+      this.leaveGame();
+    }
+    if (msg.type === 'error') this.ui.caption('Server: ' + msg.error);
+  }
+
+  _makeNet() {
+    return new RoomsClient(this.platform, {
+      onMessage: (msg) => this.onHostedMessage(msg),
+      onCaption: (text) => this.ui.caption(text),
+      onAuthorityState: (state, events) => {
+        if (this.session && this.net && this.session === this.net.sim) this.onState(state, events);
+      },
+      onAuthorityReject: (reason) => this.onReject(reason),
+    });
+  }
+
   hostedConnect(onOpen) {
     if (this.ws && this.ws.readyState === 1) return onOpen();
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -325,51 +436,75 @@ class App {
     this.ws.onmessage = (ev) => {
       let msg;
       try { msg = JSON.parse(ev.data); } catch (e) { return; }
-      if (msg.type === 'room') {
-        if (msg.you) this.hostedSeatId = msg.you; // remember which seat is ours
-        this.ui.updateLobby(msg);
-      }
-      if (msg.type === 'started') {
-        this.stage = { id: 'hosted', name: 'Hosted Council', seed: msg.state.seed, config: msg.state, goals: { tasks: msg.state.tasks.length }, par: 80, difficulty: 3, theme: this.settings.theme };
-        this.session = new SoloSession({ id: 'hosted', seed: msg.state.seed, config: { seed: msg.state.seed, playerCount: msg.state.players.length, saboteurCount: 1, taskCount: msg.state.tasks.length } }, {
-          onState: (s, e) => this.onState(s, e), onReject: (reason) => this.onReject(reason), onEnd: (result) => this.onEnd(result),
-        });
-        this.session.stopAi();
-        // Our seat is rarely p0 in a hosted room: commands must carry our own
-        // player id or the server rejects them as identity_mismatch.
-        const mine = (msg.seats || []).find((s) => s.id === this.hostedSeatId);
-        this.session.humanId = mine && mine.playerId ? mine.playerId : 'p0';
-        this.ui.showScreen(null);
-        this.buildRenderer(this.stage);
-        this.phase = 'active';
-        this.ui.showHud(true);
-        this.applyHostedState(msg.state, ['The session begins.']);
-      }
-      if (msg.type === 'state') this.applyHostedState(msg.state, []);
-      if (msg.type === 'snapshot') {
-        this.applyHostedState(msg.state, msg.away && msg.away.length ? ['While you were away:'].concat(msg.away) : []);
-      }
-      if (msg.type === 'rejected') this.onReject(msg.reason);
-      if (msg.type === 'results') {
-        this.applyHostedState(msg.state, []);
-      }
-      if (msg.type === 'error') this.ui.caption('Server: ' + msg.error);
+      this.onHostedMessage(msg);
     };
   }
 
   applyHostedState(state, notes) {
     if (!this.session) return;
-    this.session.state = state;
-    this.onState(state, notes.map((t) => ({ kind: 'meeting', text: t })));
-    if (state.phase === 'over' && this.phase !== 'results') this.session.finish();
+    // The host's session is the live authority; never overwrite it with the
+    // trimmed wire copy.
+    if (!(this.net && this.net.isHost && this.session === this.net.sim)) this.session.state = state;
+    this.onState(this.session.state, notes.map((t) => ({ kind: 'meeting', text: t })));
+    if (this.session.state.phase === 'over' && this.phase !== 'results') this.session.finish();
   }
 
-  hostedCreate() { this.hostedConnect(() => this.ws.send(JSON.stringify({ type: 'create', name: this.save.profile.name }))); }
-  hostedQuickJoin() { this.hostedConnect(() => this.ws.send(JSON.stringify({ type: 'quickjoin', name: this.save.profile.name }))); }
-  hostedJoin(code) { this.hostedConnect(() => this.ws.send(JSON.stringify({ type: 'join', code, name: this.save.profile.name }))); }
-  hostedAddAi() { if (this.ws) this.ws.send(JSON.stringify({ type: 'addAi' })); }
-  hostedReady() { if (this.ws) this.ws.send(JSON.stringify({ type: 'ready', ready: true })); }
-  hostedStart() { if (this.ws) this.ws.send(JSON.stringify({ type: 'start' })); }
+  hostedCreate() {
+    if (this.platform.hosted) {
+      this.net = this._makeNet();
+      this.net.createRoom().catch((e) => {
+        this.ui.caption('Could not create a room — try again.');
+        this.net = null;
+      });
+      return;
+    }
+    this.hostedConnect(() => this.ws.send(JSON.stringify({ type: 'create', name: this.save.profile.name })));
+  }
+
+  hostedQuickJoin() {
+    if (this.platform.hosted) {
+      this.net = this._makeNet();
+      this.net.quickJoin().then((ok) => { if (!ok) this.net = null; }).catch((e) => {
+        this.ui.caption('Quick join failed — try again.');
+        this.net = null;
+      });
+      return;
+    }
+    this.hostedConnect(() => this.ws.send(JSON.stringify({ type: 'quickjoin', name: this.save.profile.name })));
+  }
+
+  hostedJoin(code) {
+    if (this.platform.hosted) {
+      // The platform quick-join flow has no room-code entry; codes remain a
+      // local-play (server.js) feature.
+      this.ui.caption('Room codes are local-play only — use Quick Join here.');
+      return;
+    }
+    this.hostedConnect(() => this.ws.send(JSON.stringify({ type: 'join', code, name: this.save.profile.name })));
+  }
+
+  hostedAddAi() {
+    if (this.net) { if (this.net.isHost) this.net.addAi(); return; }
+    if (this.ws) this.ws.send(JSON.stringify({ type: 'addAi' }));
+  }
+
+  hostedReady() {
+    if (this.net) { this.net.setReady(); return; }
+    if (this.ws) this.ws.send(JSON.stringify({ type: 'ready', ready: true }));
+  }
+
+  hostedStart() {
+    if (this.net) { if (this.net.isHost) this.net.start(); return; }
+    if (this.ws) this.ws.send(JSON.stringify({ type: 'start' }));
+  }
+
+  hostedLeave() {
+    if (this.net) {
+      this.net.leave();
+      this.net = null;
+      this.showScreen(this.ui.hostedScreen());
+    }
+  }
 
   // --------------------------------------------------------------- input --
 
@@ -455,8 +590,8 @@ class App {
       const hidden = document.hidden;
       if (this.renderer) this.renderer.setHidden(hidden);
       this.audio.setMuted(hidden);
-      // Backgrounding pauses solo simulation.
-      if (hidden && this.phase === 'active' && !this.ws) this.pauseGame();
+      // Backgrounding pauses solo simulation (never an authoritative hosted seat).
+      if (hidden && this.phase === 'active' && !this.hostedActive()) this.pauseGame();
     });
     window.addEventListener('resize', () => { if (this.renderer) this.renderer.resize(); });
     window.addEventListener('orientationchange', () => setTimeout(() => { if (this.renderer) this.renderer.resize(); }, 120));

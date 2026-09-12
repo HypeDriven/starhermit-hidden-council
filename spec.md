@@ -32,10 +32,12 @@ station's tasks, and work out which of you is winding the machine backwards.
 | `src/ui.js` | Semantic DOM shell: HUD rails, screens, settings, live regions, results table. Issues commands only through the session. |
 | `src/render.js` | Three.js station: procedural rooms, pawns, gears, camera framing, quality tiers, picking, context-loss recovery. |
 | `src/audio.js` | WebAudio engine: 4 buses, authored Opus one-shots with synth fallback, ambience bed, generative music stem, captions. |
-| `src/main.js` | App state machine, input binding, hosted WebSocket client, settings application. |
+| `src/main.js` | App state machine, input binding, platform/cloud wiring, hosted rooms (platform) + legacy dev-socket client, settings application. |
+| `src/platform.js` | StarHermit adapter: launch-token read/strip + 45-min refresh, Bearer API, nickname resolution, zip+base64 cloud-save mirror, read-only leaderboard. No-ops offline. |
+| `src/net.js` | `RoomsClient`: StarHermit realtime rooms (REST lobby + `/ws/v1/realtime` binary transport), host-routed authority reusing `SoloSession`. |
 | `src/util.js` | Seeded RNG (mulberry32), FNV-1a string hash, formatting helpers. |
-| `server.js` | Zero-dependency authoritative server: static files, `/api/v1/*`, hand-rolled RFC 6455 WebSocket rooms. |
-| `tests/run.js` | 35 unit/integration tests (`npm test`), including real server + raw WebSocket handshakes. |
+| `server.js` | Zero-dependency local-dev server: static files, `/api/v1/*`, hand-rolled RFC 6455 WebSocket rooms (no-token path only). |
+| `tests/run.js` | 49 unit/integration tests (`npm test`), including real server + raw WebSocket handshakes and mocked platform/rooms adapter tests. |
 | `tests/e2e.mjs` | Playwright-core playthrough of the real UI at 1280×800 and 390×844. |
 | `tests/hosted-browser.mjs` | Two-browser hosted-lobby smoke driver. |
 | `sfx/` | 16 authored Opus one-shots + `manifest.txt` (canonical), `manifest.json` (regeneration), `manifest.md`. |
@@ -217,7 +219,7 @@ game and is what the content validator uses.
 | Daily Chime | `dailyStage(date)` | 7 players, 2 saboteurs, 10 tasks, one immutable seed per UTC day, par 90 | **Yes** | Optional |
 | Practice | `practiceStage(d)` | Difficulty 1–5, 5–9 players, 6–14 tasks, undo enabled, score never submitted | No | Undo + hints |
 | Challenge | `challengeStage(kind)` | *Beat the Clock* 55 ticks · *Short Fuse* 40 ticks · *Sure-Footed* 46 moves, all 6 players / 8 tasks | Optional | Optional |
-| Hosted Play | `server.js` rooms | 6-character room code, quick-join, addable automata, ready/start, authoritative state | No | Optional |
+| Hosted Play | StarHermit realtime rooms (hosted) / `server.js` rooms (local dev) | 6-character room code (local dev), quick-join, addable automata, ready/start, host-routed authoritative state | No | Optional |
 
 **Difficulty curve.** Journey stage *i* raises player count every 6 stages, tasks every 3, adds a
 second saboteur on stages where `i % 3 === 0` from stage 10 (and always from stage 29), shortens the elimination cooldown by band,
@@ -413,27 +415,50 @@ listed as unimplemented intent in §16. All formatting already goes through help
 `starhermit.txt` declares `name`, `launch=index.html`, `owner`, `server=server.js`,
 `version=1.1.0`, `cover=coverart.png` per the conventions at https://wiki.starhermit.com/.
 
+**Hosted mode** activates only when a launch token was read from the URL fragment
+`#game_token=<jwt>` (read once, then stripped via `history.replaceState`; query
+`?token=`/`?launch=`/`?launch_token=` remain as local-dev fallbacks). The JWT
+payload (base64url decode, no verify) carries `sub` and `game_scope` (the slug).
+The token is re-minted every 45 min via `POST /api/v1/games/{slug}/launch-token`
+(60 s retry) and sent as `Authorization: Bearer` on every REST call; the
+realtime socket uses `?access_token=`.
+
 **Used**
-* *Server script* — `server.js` is the platform-launched game server: static hosting plus the
-  game's own REST and WebSocket surface.
-* *Platform time* — `GET /api/v1/time` is sampled at boot (`syncServerTime`) and the round-trip
-  midpoint offset decides which UTC day the Daily Chime belongs to, so a skewed client clock
-  cannot shift the daily seed.
-* *Leaderboards* — `POST /api/v1/scores` (validated: name ≤24 chars, integer score ≤5000, integer
-  seed, matching `RULES_VERSION`, sane `contentVersion`, duration 1 s–6 h) and
-  `GET /api/v1/leaderboard?scope=global|daily`, persisted to `scores.json`. Practice stages never
-  submit; ranked submissions carry the `daily` flag and an `assists` flag.
-* *Achievements* — `POST /api/v1/achievements` records the five keys idempotently per profile
-  alongside the local save.
-* *Sessions / multiplayer* — hosted rooms over `/ws` (hand-rolled RFC 6455): create, join by code,
-  quick-join, add automaton, ready, start, command, plus `snapshot` reconnect with an
-  "while you were away" summary. The server owns the authoritative state and rejects commands
-  whose `player` does not match the requesting seat (`identity_mismatch`).
-* *Identity* — a local display name (≤24 chars) is attached to scores and lobby seats.
+* *Identity* — `GET /api/v1/users/{sub}/profile` provides the display nickname
+  (never `/api/v1/me`, never usernames; `"Player " + id8` fallback), shown in the
+  title-screen profile slot with a cloud-sync badge (synced/saving…/offline). The
+  free-text local name remains the offline path.
+* *Cloud save* — the versioned+checksummed save doc mirrors to
+  `GET/PUT /api/v1/me/cloud-saves/{slug}` (one zip+base64 slot via the stored-zip
+  helper; remote wins on conflict through `mergeSaves`). Saves debounce ~2 s and
+  flush on `pagehide`/`visibilitychange`; localStorage stays the offline cache.
+* *Platform time* — `GET /api/v1/time` (Bearer when hosted) is sampled at boot
+  (`syncServerTime`) and the round-trip midpoint decides which UTC day the Daily
+  Chime belongs to; failure degrades to the local clock.
+* *Leaderboards (read-only)* — clients never submit scores. `GET
+  /api/v1/games/{slug}` → `leaderboardId` → `GET /api/v1/leaderboards/{id}/entries`
+  (nicknames resolved via the profile helper, own row marked) renders on the
+  results screen; personal bests live in the cloud-mirrored save. Without a
+  `leaderboardId` or offline, only local records are shown.
+* *Achievements* — local only, part of the cloud-saved doc (no platform unlock
+  endpoint is called; `server.js` is not a Jint game script).
+* *Sessions / multiplayer* — hosted rooms use StarHermit realtime rooms
+  (`src/net.js`): REST lobby (`POST /api/v1/realtime/rooms`, `/open`,
+  `/quick-join`, `/result`, `/leave`, `/mine` for reconnect) and
+  `ws(s)://<host>/ws/v1/realtime?roomId=&access_token=`. The platform prefixes
+  binary frames with a 16-byte sender id (stripped); guest frames reach the host
+  only, host frames everyone. The game's existing JSON messages ride the binary
+  channel (8 KB cap — state logs are trimmed for transport); the creating tab
+  runs the authoritative `SoloSession` and broadcasts snapshots; roster pushes
+  drive the lobby and host-departure detection.
+* *Server script (local dev)* — with no token, `server.js` remains the dev
+  server: its `/api/v1/time`, `/api/v1/scores`, `/api/v1/leaderboard`,
+  `/api/v1/achievements` and the `/ws` room protocol are the local-play path and
+  are never called in hosted mode.
 
 **Not used**: platform presence/friends feeds, chat or moderation services, entitlements,
-purchases, cloud saves (progress is local plus server-side leaderboard rows), and party
-invitations outside the room-code flow.
+purchases, friend invites (quick-join only; room codes are local-dev), and score
+submission (read-only boards by design).
 
 ---
 
@@ -452,7 +477,9 @@ carry `RULES_VERSION = 1` with a v0→v1 migration path. `exportReplay()` emits
 
 **Persistence.** `hidden-council-save` (v1 envelope with an FNV-1a checksum; a bad checksum falls
 back to a fresh save rather than crashing) and `hidden-council-settings`. Both writes are
-try/caught for private-mode/quota failures.
+try/caught for private-mode/quota failures. Hosted, the same envelope mirrors to the platform
+cloud-save slot (zip+base64; remote wins on conflict through `mergeSaves`; 2 s debounce +
+pagehide flush); localStorage stays the offline cache.
 
 **Resilience.** WebGL absence is detected before the renderer is built and routes to a
 Compatibility screen that keeps the DOM game fully playable; `webglcontextlost` is prevented and
@@ -479,7 +506,7 @@ progression check → retry → Esc → leave. It runs the whole flow twice, at 
 
 ## 14. Testing and acceptance criteria
 
-`npm test` (`tests/run.js`, 35 tests, zero dependencies) covers: initial-state shape and
+`npm test` (`tests/run.js`, 49 tests, zero dependencies) covers: initial-state shape and
 serializability; legal-action sets per role and phase; move legality (`not_linked`, `bad_room`);
 task rules (`wrong_room`, `task_done`, `not_crew`); the elimination witness rule and cooldown;
 report/meeting flow; vote tallying, majority, ties and skip; every terminal condition and its
@@ -488,10 +515,14 @@ serialization round-trip and v0→v1 migration; replay hash equality for identic
 a bounded full simulation; a malformed-command fuzz pass that must never throw or produce NaN;
 "AI commands are always legal"; content shape for all 40 journey stages; that stage goal limits
 reach the rules config; theme/tutorial/daily determinism; the validator passing every journey
-stage and seven days of dailies and rejecting defective stages; and live `server.js` checks —
-`/api/v1/time`, static `index.html`, structured 404s, score submit/leaderboard, rejection of
-impossible/stale scores, idempotent achievements, a raw WebSocket lobby create/join/ready/start,
-and that a second human seat maps to its own player id.
+stage and seven days of dailies and rejecting defective stages; the platform adapter (zip
+round-trip, JWT decode, fragment read/strip + query fallback, Bearer on every call, token
+refresh swap, nickname + fallback, cloud debounce/push/load) and the rooms client (REST create
++ ws URL, honest quick-join 404, binary guest commands with prefix stripping, seat resolution,
+8 KB wire trimming, host-left detection) with mocked fetch/WebSocket; and live `server.js`
+checks — `/api/v1/time`, static `index.html`, structured 404s, score submit/leaderboard,
+rejection of impossible/stale scores, idempotent achievements, a raw WebSocket lobby
+create/join/ready/start, and that a second human seat maps to its own player id.
 
 `npm run test:e2e` must finish both viewport passes with zero console errors.
 
@@ -554,8 +585,9 @@ All music and ambience are generated at runtime; the game ships no character ani
   bell with a reported incident.
 * **Hosted results are thin.** The hosted path skips `recordCompletion`, so hosted sessions do not
   advance streaks, achievements or journey records.
-* **Leaderboard trust.** Scores are validated for plausibility but not replayed server-side; the
-  replay machinery exists but no endpoint verifies a submitted command list.
+* **Leaderboard trust (local dev).** The local `server.js` board validates scores for
+  plausibility but does not replay them; on-platform the board is read-only (clients cannot
+  submit) and the replay chain is not verified anywhere.
 * **Undo is snapshot-based** (40 deep) and disabled outside practice/tutorial; it also cannot undo
   an AI turn independently of the player's own.
 
