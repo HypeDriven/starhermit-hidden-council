@@ -3,7 +3,8 @@
 // State machine: boot → title → mode-select → preparing → countdown →
 // active ↔ paused → resolving → results → progression.
 
-import { StationRenderer, ROOM_POS, LAYER_GAME } from './render.js';
+import { StationRenderer, ROOM_POS, LAYER_GAME, gpuName } from './render.js';
+import { autoPreset } from './gfx.js';
 import { UI } from './ui.js';
 import { AudioEngine } from './audio.js';
 import {
@@ -60,8 +61,21 @@ class App {
   webglAvailable() {
     try {
       const c = document.createElement('canvas');
-      return !!(c.getContext('webgl2') || c.getContext('webgl'));
+      const gl = c.getContext('webgl2') || c.getContext('webgl');
+      if (gl && this.gpu == null) {
+        // One-time GPU probe for the Graphics panel's Auto preset.
+        this.gpu = gpuName(gl);
+        const mobile = (navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches) || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+        this.gpuPreset = autoPreset(this.gpu, mobile);
+      }
+      return !!gl;
     } catch (e) { return false; }
+  }
+
+  /** GPU name + Auto preset for the Graphics panel (probed once). */
+  gpuInfo() {
+    if (this.gpu == null) this.webglAvailable();
+    return { gpu: this.gpu || 'unknown GPU', detected: this.gpuPreset || 'balanced' };
   }
 
   persistSave() {
@@ -132,7 +146,7 @@ class App {
     this.renderer = new StationRenderer(this.ui.canvas, {
       seed: stage.seed, theme: this.settings.theme === 'auto' ? stage.theme : this.settings.theme,
       reducedMotion: this.settings.reducedMotion, cvd: this.settings.cvdPalette,
-      tier: this.settings.tier === 'auto' ? 'medium' : this.settings.tier,
+      graphics: this.settings.graphics, gpu: this.gpuInfo().gpu, detected: this.gpuInfo().detected,
     });
     if (this.renderer.failed) { this.renderer = null; return; }
     this.renderer.syncState(this.session.state);
@@ -610,6 +624,9 @@ class App {
     b.classList.toggle('hc-high-contrast', !!this.settings.highContrast);
     b.classList.toggle('hc-left-handed', !!this.settings.leftHanded);
     b.classList.toggle('hc-reduced-motion', !!this.settings.reducedMotion);
+    // Stable hook for tests/tools: the resolved graphics preset.
+    const g = this.settings.graphics || {};
+    b.dataset.gfxPreset = g.preset && g.preset !== 'auto' ? g.preset : 'auto-' + this.gpuInfo().detected;
   }
 
   applySettings() {
@@ -620,7 +637,7 @@ class App {
       this.renderer.cvd = !!this.settings.cvdPalette;
       this.renderer.reducedMotion = !!this.settings.reducedMotion;
       this.renderer.setTheme(this.settings.theme === 'auto' ? (this.stage ? this.stage.theme : THEMES[0].id) : this.settings.theme);
-      this.renderer.setQuality(this.settings.tier === 'auto' ? 'medium' : this.settings.tier);
+      this.renderer.setGraphics(this.settings.graphics);
     }
   }
 }

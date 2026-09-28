@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node tests/run.js",
+    "test": "node tests/run.js && node --test tests/gfx.test.mjs",
     "test:e2e": "node tests/e2e.mjs"
   },
   "keywords": [],

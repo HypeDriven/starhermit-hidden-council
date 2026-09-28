@@ -173,10 +173,17 @@ async function playUntilResults(page, vp, deadlineMs = 300000) {
     try {
       if (!hintDone && buttons.some((b) => b.startsWith('💡 Hint'))) {
         hintDone = true;
+        // Record every caption shown: an AI event in the same tick can replace
+        // the hint caption before it is read back.
+        await page.evaluate(() => {
+          window.__captions = [];
+          const el = document.querySelector('.hc-caption');
+          new MutationObserver(() => window.__captions.push(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true });
+        });
         await clickAction(page, buttons.find((b) => b.startsWith('💡 Hint')));
-        const caption = await page.textContent('.hc-caption');
-        if (!caption || !caption.startsWith('Hint:')) throw new Error('hint produced no caption');
-        console.log('  hint:', caption);
+        await page.waitForFunction(() => (window.__captions || []).some((c) => c.startsWith('Hint:')), null, { timeout: 2000 })
+          .catch(() => { throw new Error('hint produced no caption'); });
+        console.log('  hint:', (await page.evaluate(() => window.__captions.find((c) => c.startsWith('Hint:')))));
       } else if (buttons.includes('⚠ Report incident')) {
         await clickAction(page, '⚠ Report incident');
         acts++;
@@ -231,6 +238,7 @@ async function runPass(browser, port, vp) {
     viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 },
     hasTouch: mobile,
     isMobile: mobile,
+    locale: 'en-US',
   });
   const page = await context.newPage();
   const errors = [];
@@ -313,10 +321,8 @@ async function runPass(browser, port, vp) {
       await page.waitForFunction(() => document.body.classList.contains('hc-reduced-motion'));
       const music = page.getByLabel('Music');
       await music.fill('0.2');
-      const tier = page.getByLabel('Graphics tier');
-      await tier.selectOption('low');
       const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('hidden-council-settings')));
-      if (!stored.reducedMotion || stored.tier !== 'low') throw new Error('settings not persisted');
+      if (!stored.reducedMotion || stored.music !== 0.2) throw new Error('settings not persisted');
       await page.screenshot({ path: SHOT('pause-settings', vp) });
       await page.getByRole('button', { name: '▶ Resume' }).click();
       await waitForPhase(page, 'active');
@@ -347,15 +353,71 @@ async function runPass(browser, port, vp) {
       console.log('  sessions:', save.data.sessions, 'wins:', save.data.wins);
     });
 
-    await step('retry → pause (Esc) → leave to title', async () => {
+    await step('retry → pause (Esc)', async () => {
       await page.getByRole('button', { name: '↻ Retry' }).click();
       await waitForPhase(page, 'active', 10000);
       await page.keyboard.press('Escape');
       await page.getByRole('heading', { name: 'Paused' }).waitFor();
+    });
+
+    await step('pause → Graphics: Low, Ultra, High, override, applied live', async () => {
+      const gfx = page.locator('#hc-gfx');
+      await gfx.scrollIntoViewIfNeeded();
+      const summary = page.locator('#hc-gfx-summary');
+      // Auto on a software GPU resolves to Low.
+      if (!(await page.locator('#hc-gfx-preset option[value="auto"]').textContent()).includes('Low')) throw new Error('Auto should detect Low on SwiftShader');
+      await page.locator('#hc-gfx-preset').selectOption('low');
+      await page.waitForFunction(() => document.body.dataset.gfxPreset === 'low');
+      await page.waitForFunction(() => /no shadows/.test(document.getElementById('hc-gfx-summary').textContent));
+      await page.locator('#hc-gfx-preset').selectOption('ultra');
+      await page.waitForFunction(() => document.body.dataset.gfxPreset === 'ultra');
+      await page.waitForTimeout(600); // a few Ultra frames through the full post chain
+      await page.locator('#hc-gfx-preset').selectOption('high');
+      await page.waitForFunction(() => document.body.dataset.gfxPreset === 'high' && /2048² shadows/.test(document.getElementById('hc-gfx-summary').textContent));
+      const bloom = page.locator('#hc-gfx-bloom');
+      if (!(await bloom.locator('option[value="preset"]').textContent()).includes('On')) throw new Error('bloom From preset label');
+      await bloom.selectOption('off');
+      await page.waitForFunction(() => !/bloom/.test(document.getElementById('hc-gfx-summary').textContent));
+      await page.locator('#hc-gfx-fps').check();
+      await page.locator('#hc-fps').waitFor({ state: 'visible' });
+      await page.locator('#hc-gfx-fps').uncheck();
+      if (await page.locator('#hc-gfx-note').isVisible()) throw new Error('post-processing reported unavailable');
+      const g = await page.evaluate(() => JSON.parse(localStorage.getItem('hidden-council-settings')).graphics);
+      if (g.preset !== 'high' || g.bloom !== 'off') throw new Error('graphics not persisted: ' + JSON.stringify(g));
+      if (!(await summary.textContent()).includes('px')) throw new Error('summary missing pixels');
+      await gfx.screenshot({ path: SHOT('graphics-panel', vp) });
+      // Back to Low (a preset choice clears the override), then re-add one override.
+      await page.locator('#hc-gfx-preset').selectOption('low');
+      await page.waitForFunction(() => document.body.dataset.gfxPreset === 'low');
+      const g2 = await page.evaluate(() => JSON.parse(localStorage.getItem('hidden-council-settings')).graphics);
+      if (g2.bloom) throw new Error('choosing a preset must clear overrides');
+      await bloom.selectOption('on');
+    });
+
+    await step('leave to title', async () => {
       await page.getByRole('button', { name: 'Leave Session' }).click();
       await waitForPhase(page, 'title');
       await page.getByRole('button', { name: '▶ Play' }).waitFor({ state: 'visible' });
       await page.screenshot({ path: SHOT('back-to-title', vp) });
+    });
+
+    await step('graphics settings survive reload (title → Settings)', async () => {
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForFunction(() => window.__hiddenCouncil?.phase === 'title', null, { timeout: 15000 });
+      await page.getByRole('button', { name: '⚙ Settings' }).click();
+      await page.locator('#hc-gfx').scrollIntoViewIfNeeded();
+      if (await page.locator('#hc-gfx-preset').inputValue() !== 'low') throw new Error('preset lost on reload');
+      if (await page.locator('#hc-gfx-bloom').inputValue() !== 'on') throw new Error('override lost on reload');
+      if (await page.evaluate(() => document.body.dataset.gfxPreset) !== 'low') throw new Error('data-gfx-preset lost on reload');
+      // Keyboard: the preset select is reachable and operable without a pointer.
+      await page.locator('#hc-gfx-preset').focus();
+      await page.keyboard.press('ArrowDown');
+      await page.waitForFunction(() => document.body.dataset.gfxPreset === 'balanced');
+      const box = await page.locator('.hc-screen').boundingBox();
+      const vw = page.viewportSize();
+      if (box.x < 0 || box.y < 0 || box.x + box.width > vw.width + 1 || box.y + box.height > vw.height + 1) throw new Error('settings panel overflows the viewport');
+      await page.getByRole('button', { name: '← Back' }).click();
+      await waitForPhase(page, 'title');
     });
   } finally {
     await context.close();
@@ -374,7 +436,7 @@ try {
 
   browser = await chromium.launch({
     executablePath: '/usr/bin/google-chrome',
-    args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
+    args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
   });
 
   await runPass(browser, started.port, 'desktop');

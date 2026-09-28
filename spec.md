@@ -18,7 +18,7 @@ station's tasks, and work out which of you is winding the machine backwards.
 | Players | 1 human seat + 3–11 automata solo; up to 12 seats in hosted rooms |
 | Session length | ~2–8 minutes (par is 30–100 ticks depending on stage) |
 | Platforms | Desktop and mobile browsers, portrait and landscape |
-| Rendering | Three.js (r185) procedural station scene over a complete semantic DOM UI; the DOM UI alone is fully playable |
+| Rendering | Three.js (r185) procedural station scene (post-processing and `RoomEnvironment` addons bundled from the same `three` package) over a complete semantic DOM UI; the DOM UI alone is fully playable |
 | Build | `esbuild` IIFE bundle — `./build.sh` writes `bundle.js` + copies `src/styles.css` to `bundle.css` |
 
 ### File map
@@ -30,7 +30,9 @@ station's tasks, and work out which of you is winding the machine backwards.
 | `src/content.js` | Versioned content (`CONTENT_VERSION = 3`): 5 themes, 3 tutorials, 40 journey stages, daily/practice/challenge builders, offline stage validator. |
 | `src/session.js` | Session driver: solo loop, AI scheduling, undo stack, save/settings persistence, achievements, server-time sync, replay export. |
 | `src/ui.js` | Semantic DOM shell: HUD rails, screens, settings, live regions, results table. Issues commands only through the session. |
-| `src/render.js` | Three.js station: procedural rooms, pawns, gears, camera framing, quality tiers, picking, context-loss recovery. |
+| `src/render.js` | Three.js station: procedural rooms, pawns, gears, lamps, dust motes, camera framing, graphics settings (shadows, IBL, EffectComposer post chain, adaptive resolution, FPS readout), picking, context-loss recovery. |
+| `src/gfx.js` | Pure graphics quality model: presets, per-category overrides, GPU detection (`detectPreset`/`autoPreset`), `resolve()`, `presetTier()`, `choosePreset()`, `describe()`. |
+| `src/i18n-gfx.js` | Localized strings for the Graphics settings section (en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT). |
 | `src/audio.js` | WebAudio engine: 4 buses, authored Opus one-shots with synth fallback, ambience bed, generative music stem, captions. |
 | `src/main.js` | App state machine, input binding, platform/cloud wiring, hosted rooms (platform) + legacy dev-socket client, settings application. |
 | `src/platform.js` | StarHermit adapter: launch-token read/strip + 45-min refresh, Bearer API, nickname resolution, zip+base64 cloud-save mirror, read-only leaderboard. No-ops offline. |
@@ -38,6 +40,7 @@ station's tasks, and work out which of you is winding the machine backwards.
 | `src/util.js` | Seeded RNG (mulberry32), FNV-1a string hash, formatting helpers. |
 | `server.js` | Zero-dependency local-dev server: static files, `/api/v1/*`, hand-rolled RFC 6455 WebSocket rooms (no-token path only). |
 | `tests/run.js` | 49 unit/integration tests (`npm test`), including real server + raw WebSocket handshakes and mocked platform/rooms adapter tests. |
+| `tests/gfx.test.mjs` | `node --test` unit tests for `gfx.js` and the Graphics locale tables (run by `npm test` after `run.js`). |
 | `tests/e2e.mjs` | Playwright-core playthrough of the real UI at 1280×800 and 390×844. |
 | `tests/hosted-browser.mjs` | Two-browser hosted-lobby smoke driver. |
 | `sfx/` | 16 authored Opus one-shots + `manifest.txt` (canonical), `manifest.json` (regeneration), `manifest.md`. |
@@ -319,9 +322,32 @@ score table.
 **Motion.** Camera moves are smoothstepped glides to the focused room; gears turn slowly;
 selection is a pulsing ring on its own render layer. Reduced motion shortens the countdown to
 250 ms steps, drops the AI think delay from 450 ms to 200 ms, removes button transitions, and
-suppresses idle animation in the renderer. Quality tiers gate cost: `low` (no shadows, no
-particles, 0.75 render scale, 4 gears), `medium` (shadows, 200 particles, 8 gears),
-`high` (2× pixel ratio, 800 particles, 14 gears).
+suppresses idle animation in the renderer (lamp shimmer and drifting motes also stop under the
+OS `prefers-reduced-motion` preference).
+
+**Graphics.** ACES filmic tone mapping with sRGB output; a warm key directional light whose
+shadow box is fitted to the deck slab and gear ring, a hemisphere fill and an accent rim light;
+a radial sky-glow background with distance fog in the theme's sky colour. Surfaces are PBR:
+riveted deck plates, turned-brass room dials and slatted corridor gratings are procedural canvas
+textures (colour + bump), pawns are lacquered `MeshPhysicalMaterial` with clearcoat, and each room
+has a lamp post whose bulb is emissive enough to bloom. Optional effects: key-light PCF shadows
+(1024/2048/4096), image-based lighting from a PMREM `RoomEnvironment` ("reflections"), GTAO
+contact darkening, bloom limited to lamps and highlights (threshold 0.9), a colour grade (gentle
+S-curve, saturation, warm/cool split, slight black lift) with vignette, FXAA/SMAA/MSAA, up to 520
+additive brass-dust motes, and surface detail (plain colours and 8 gears vs textured surfaces and
+14 gears). Settings and Pause both contain a **Graphics** section: Quality (Auto, chosen from the
+unmasked GPU name — software renderers get Low, discrete GPUs and Apple M get High, others
+Balanced, capped at Balanced on touch/mobile devices; Low; Balanced; High; Ultra), a render
+scale slider (50–200% of the preset's), one select per effect defaulting to "From preset (…)"
+(choosing a preset clears overrides), adaptive resolution (averages 90 frames; above 26 ms it
+steps the scale down 0.1 to a floor of 0.6, below 14 ms back up 0.05), a frame-rate readout
+(bottom-left, never over controls), and a summary line "GPU · cost · W×H px". Pixel ratio is
+min(devicePixelRatio, preset cap 1/1.5/2/2) × render scale × adaptive scale. Changes apply
+live, persist in `hidden-council-settings.graphics` (the old `tier` value migrates to a preset),
+and set `data-gfx-preset` on `<body>`. The post chain is built only when an effect needs it, so
+Low renders directly; if the chain cannot be built the station renders without it and the panel
+says so. The Graphics strings are localized from `navigator.language`; the rest of the UI is
+English.
 
 **Visual assets the design calls for**: a title/menu key-art backdrop of the station interior; a
 results illustration of the council chamber after a verdict; platform cover art and icons. Both
@@ -488,8 +514,9 @@ continues without a canvas. Fetches to `/api/v1/*` degrade to offline behaviour.
 back to synthesis; missing images are removed from the DOM.
 
 **Performance budgets.** One `requestAnimationFrame` loop, paused when the document is hidden.
-Tier caps: pixel ratio 1/1.5/2, render scale 0.75/1/1, particles 0/200/800, gears 4/8/14, shadows
-off on `low`. Geometry and materials are disposed on teardown. The bundle is ~579 KB minified
+Preset caps (Low/Balanced/High/Ultra): pixel ratio 1/1.5/2/2, render scale 1/1/1/1.25, motes
+0/160/520/520, gears 8/14/14/14, shadows off/1024/2048/4096; Low has no post chain. Geometry,
+materials, textures and the composer are disposed on teardown. The bundle is ~755 KB minified
 (Three.js dominates); `bundle.css` is 8 KB; the 16 Opus clips total ~350 KB and load lazily; the
 two WebP images total ~102 KB.
 
@@ -499,7 +526,10 @@ visible buttons: title → mode select → each menu screen → Daily Chime → 
 HUD actions chosen from the actually-rendered "Go:", "Do:", "⚠ Report", "Vote:" and "Wait"
 buttons (using a BFS mirror of the room graph purely to pick which visible move button to press)
 → pause/settings/resume → results (asserting ≥6 score rows and a headline) → localStorage
-progression check → retry → Esc → leave. It runs the whole flow twice, at 1280×800 and at
+progression check → retry → Esc → Graphics section (Auto detects Low, Low → Ultra → High with
+`data-gfx-preset` and summary checks, a bloom override, the FPS readout, persistence, preset
+clears overrides) → leave → reload → Settings shows the saved graphics, keyboard changes the
+preset, and the panel fits the viewport. It runs the whole flow twice, at 1280×800 and at
 390×844 with touch, and fails on any console error or page error.
 
 ---
@@ -524,7 +554,11 @@ checks — `/api/v1/time`, static `index.html`, structured 404s, score submit/le
 rejection of impossible/stale scores, idempotent achievements, a raw WebSocket lobby
 create/join/ready/start, and that a second human seat maps to its own player id.
 
-`npm run test:e2e` must finish both viewport passes with zero console errors.
+`tests/gfx.test.mjs` covers `detectPreset`/`autoPreset` on sample GPU strings, `resolve()` with
+presets, overrides, invalid overrides and render-scale clamping, preset-clears-overrides,
+`describe()`, and that every required locale has every Graphics string.
+
+`npm run test:e2e` must finish both viewport passes with zero console errors or warnings.
 
 QA bar (`agents/qa.md`) as checkable statements:
 

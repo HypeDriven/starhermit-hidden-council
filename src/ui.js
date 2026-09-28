@@ -5,6 +5,8 @@
 
 import { THEMES, TUTORIALS, JOURNEY } from './content.js';
 import { formatScore } from './util.js';
+import { PRESETS, CATEGORIES, resolve, presetTier, choosePreset, describe } from './gfx.js';
+import { gfxStrings, gfxLocale, fmt } from './i18n-gfx.js';
 
 export class UI {
   constructor(root, app) {
@@ -398,17 +400,6 @@ export class UI {
     };
     wrap.append(slider('Music', 'music'), slider('Effects', 'effects'), slider('Ambience', 'ambience'), slider('Voice', 'voice'));
 
-    const tier = this.el('select');
-    tier.setAttribute('aria-label', 'Graphics tier');
-    for (const t of ['auto', 'low', 'medium', 'high']) {
-      const o = this.el('option', '', t); o.value = t; tier.appendChild(o);
-    }
-    tier.value = st.tier;
-    tier.addEventListener('change', () => { st.tier = tier.value; this.app.applySettings(); });
-    const tl = this.el('label', 'hc-slider', 'Graphics ');
-    tl.appendChild(tier);
-    wrap.appendChild(tl);
-
     const theme = this.el('select');
     theme.setAttribute('aria-label', 'Visual theme');
     for (const t of THEMES) { const o = this.el('option', '', t.name); o.value = t.id; theme.appendChild(o); }
@@ -432,7 +423,118 @@ export class UI {
       toggle('Left-handed controls', 'leftHanded'), toggle('Hold to confirm', 'holdToConfirm'),
       toggle('Hints', 'hints'),
     );
+    wrap.appendChild(this.graphicsSection());
     return wrap;
+  }
+
+  // Graphics section: preset, render scale, per-effect overrides, adaptive
+  // resolution, frame-rate readout and a cost summary. Applies live.
+  graphicsSection() {
+    const T = gfxStrings();
+    const app = this.app;
+    const st = app.settings;
+    if (!st.graphics || typeof st.graphics !== 'object') st.graphics = {};
+    const sec = this.el('section', 'hc-gfx');
+    sec.id = 'hc-gfx';
+    sec.lang = gfxLocale();
+    const h = this.el('h2', 'hc-gfx-title', T.graphics);
+    h.id = 'hc-gfx-title';
+    sec.setAttribute('aria-labelledby', h.id);
+    sec.appendChild(h);
+    const row = (labelText, control, extra) => {
+      const l = this.el('label', 'hc-slider', labelText + ' ');
+      if (extra) { const box = this.el('span', 'hc-gfx-range'); box.append(control, extra); l.appendChild(box); } else l.appendChild(control);
+      control.setAttribute('aria-label', labelText);
+      sec.appendChild(l);
+      return l;
+    };
+    const commit = () => { app.applySettings(); refresh(); };
+    const info = () => app.gpuInfo();
+
+    const preset = this.el('select');
+    preset.id = 'hc-gfx-preset';
+    preset.dataset.gfx = 'preset';
+    for (const p of ['auto'].concat(PRESETS)) { const o = this.el('option'); o.value = p; preset.appendChild(o); }
+    preset.addEventListener('change', () => { st.graphics = choosePreset(st.graphics, preset.value); commit(); });
+    row(T.quality, preset);
+
+    const scale = this.el('input');
+    scale.type = 'range'; scale.min = 50; scale.max = 200; scale.step = 10;
+    scale.id = 'hc-gfx-scale';
+    scale.dataset.gfx = 'render_scale';
+    const scaleOut = this.el('output', 'hc-gfx-val');
+    scaleOut.setAttribute('for', scale.id);
+    scale.addEventListener('input', () => { st.graphics.render_scale = Number(scale.value) / 100; commit(); });
+    row(T.renderScale, scale, scaleOut);
+
+    const cats = {};
+    for (const [cat, tiers] of Object.entries(CATEGORIES)) {
+      const sel = this.el('select');
+      sel.id = 'hc-gfx-' + cat;
+      sel.dataset.gfxCat = cat;
+      for (const t of ['preset'].concat(tiers)) { const o = this.el('option'); o.value = t; o.textContent = T.tiers[t] || t; sel.appendChild(o); }
+      sel.addEventListener('change', () => {
+        if (sel.value === 'preset') delete st.graphics[cat]; else st.graphics[cat] = sel.value;
+        commit();
+      });
+      row(T.cats[cat], sel);
+      cats[cat] = sel;
+    }
+
+    const check = (labelText, id, get, set) => {
+      const l = this.el('label', 'hc-check');
+      const cb = this.el('input');
+      cb.type = 'checkbox'; cb.id = id; cb.checked = get();
+      cb.addEventListener('change', () => { set(cb.checked); commit(); });
+      l.append(cb, document.createTextNode(' ' + labelText));
+      sec.appendChild(l);
+      return cb;
+    };
+    const adaptive = check(T.adaptive, 'hc-gfx-adaptive', () => st.graphics.adaptive !== false, (v) => { st.graphics.adaptive = v; });
+    const fps = check(T.showFps, 'hc-gfx-fps', () => !!st.graphics.show_fps, (v) => { st.graphics.show_fps = v; });
+
+    const summary = this.el('p', 'hc-muted hc-gfx-summary');
+    summary.id = 'hc-gfx-summary';
+    summary.setAttribute('aria-live', 'polite');
+    const note = this.el('p', 'hc-gfx-note', T.postFailed);
+    note.id = 'hc-gfx-note';
+    note.hidden = true;
+    sec.append(summary, note);
+
+    const refresh = () => {
+      const { gpu, detected } = info();
+      const g = st.graphics;
+      const r = resolve(g, detected);
+      preset.value = PRESETS.includes(g.preset) ? g.preset : 'auto';
+      preset.options[0].textContent = fmt(T.auto, { tier: T.presets[detected] });
+      for (let i = 1; i < preset.options.length; i++) preset.options[i].textContent = T.presets[preset.options[i].value];
+      const pct = Math.round((Number(g.render_scale) || 1) * 100);
+      scale.value = pct;
+      scaleOut.textContent = pct + '%';
+      for (const [cat, sel] of Object.entries(cats)) {
+        sel.options[0].textContent = fmt(T.fromPreset, { tier: T.tiers[presetTier(r.preset, cat)] });
+        sel.value = CATEGORIES[cat].includes(g[cat]) ? g[cat] : 'preset';
+      }
+      adaptive.checked = g.adaptive !== false;
+      fps.checked = !!g.show_fps;
+      refreshSummary();
+    };
+    const refreshSummary = () => {
+      const { gpu, detected } = info();
+      const r = resolve(st.graphics, detected);
+      const live = app.renderer && app.renderer.graphicsInfo ? app.renderer.graphicsInfo() : null;
+      const px = live ? live.pixels : [
+        Math.round(window.innerWidth * Math.min(window.devicePixelRatio || 1, r.cap) * r.scale),
+        Math.round(window.innerHeight * Math.min(window.devicePixelRatio || 1, r.cap) * r.scale),
+      ];
+      summary.textContent = gpu + ' · ' + describe(live ? live.resolved : r, px, T.sum);
+      summary.dataset.preset = r.preset;
+      note.hidden = !(live && live.postFailed);
+    };
+    refresh();
+    // Keep the summary current (post-chain failures, adaptive scale) while visible.
+    const timer = setInterval(() => { if (!sec.isConnected) { clearInterval(timer); return; } refreshSummary(); }, 1000);
+    return sec;
   }
 
   settingsScreen() {

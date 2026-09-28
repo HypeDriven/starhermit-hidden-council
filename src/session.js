@@ -84,14 +84,21 @@ export function mergeSaves(a, b) {
 export function loadSettings() {
   const def = {
     music: 0.6, effects: 0.8, ambience: 0.5, voice: 0.7,
-    tier: 'auto', theme: 'brass-dawn',
+    graphics: {}, theme: 'brass-dawn',
     largeText: false, highContrast: false, cvdPalette: false, reducedMotion: false,
     leftHanded: false, holdToConfirm: false, hints: true, camera: 'default',
   };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return def;
-    return Object.assign(def, JSON.parse(raw));
+    const out = Object.assign(def, JSON.parse(raw));
+    // Migrate the old single "Graphics tier" select into the preset model.
+    if (out.tier && !(out.graphics && out.graphics.preset)) {
+      out.graphics = Object.assign({}, out.graphics, { preset: { low: 'low', medium: 'balanced', high: 'high' }[out.tier] || 'auto' });
+    }
+    delete out.tier;
+    if (!out.graphics || typeof out.graphics !== 'object') out.graphics = {};
+    return out;
   } catch (e) { return def; }
 }
 
