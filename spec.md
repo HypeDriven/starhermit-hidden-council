@@ -635,3 +635,7 @@ All music and ambience are generated at runtime; the game ships no character ani
 4. Hosted sessions feeding the same progression, achievements and leaderboard path as solo play.
 5. A surfaced suspicion readout in the council screen (who was seen where, per player) so crew AI
    voting is legible to the player.
+
+## Browser interference
+
+`browser-guard.js` (loaded from `index.html`) suppresses browser UI that gets in the way of play: the right-click context menu, the iOS long-press callout, copy / cut / paste, and page text selection. Text fields (inputs, textareas, selects, contenteditable) keep normal selection, context menu and clipboard behaviour.
