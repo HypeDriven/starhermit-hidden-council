@@ -408,124 +408,112 @@ async function main() {
     },
   });
 
-  await test('platform: zip round-trips through the stored-zip helper', () => {
-    const { zipStore, unzipFirstEntry, bytesToBase64, base64ToBytes } = platform._zip;
-    const json = JSON.stringify({ journey: { 'journey-1': { score: 42, won: true } }, sessions: 7 });
-    const data = new TextEncoder().encode(json);
-    const zip = zipStore('save.json', data);
-    const back = unzipFirstEntry(zip);
-    assert.strictEqual(new TextDecoder().decode(back), json);
-    const again = unzipFirstEntry(base64ToBytes(bytesToBase64(zip)));
-    assert.strictEqual(new TextDecoder().decode(again), json);
-  });
-
-  await test('platform: JWT payload decodes sub + game_scope', () => {
-    const claims = platform._zip.decodeJwtPayload(jwtFor({ sub: 'user-123', game_scope: 'hidden-council', exp: 1 }));
-    assert.strictEqual(claims.sub, 'user-123');
-    assert.strictEqual(claims.game_scope, 'hidden-council');
-    assert.strictEqual(platform._zip.decodeJwtPayload('not-a-jwt'), null);
-  });
-
-  await test('platform: fragment token read once + stripped; query fallback for dev', () => {
-    const savedLoc = globalThis.location, savedHist = globalThis.history;
-    let replaced = null;
-    try {
-      globalThis.location = { hash: '#game_token=TOK&session_id=abc', search: '', pathname: '/' };
-      globalThis.history = { replaceState: (n, t, url) => { replaced = url; } };
-      const p1 = new platform.Platform();
-      assert.strictEqual(p1.token, 'TOK');
-      assert.strictEqual(replaced, '/');
-      globalThis.location = { hash: '', search: '', pathname: '/' };
-      const p2 = new platform.Platform();
-      assert.strictEqual(p2.token, null);
-      globalThis.location = { hash: '', search: '?token=QTOK', pathname: '/' };
-      const p3 = new platform.Platform();
-      assert.strictEqual(p3.token, 'QTOK');
-    } finally {
-      if (savedLoc === undefined) delete globalThis.location; else globalThis.location = savedLoc;
-      if (savedHist === undefined) delete globalThis.history; else globalThis.history = savedHist;
-    }
-  });
-
-  await test('platform: api() sends Authorization: Bearer on every call', async () => {
-    await withFetch(async () => jsonRes({ ok: true }, 200), async (calls) => {
-      const p = new platform.Platform();
-      p.token = 'tk';
-      await p.api('/api/v1/anything', { method: 'POST', body: '{}' });
-      assert.strictEqual(calls.length, 1);
-      assert.strictEqual(calls[0].opts.headers.authorization, 'Bearer tk');
-      assert.strictEqual(calls[0].opts.headers['content-type'], 'application/json');
-    });
-  });
-
-  await test('platform: refresh swaps the token via games/{slug}/launch-token', async () => {
-    await withFetch(async (url) => {
-      assert(url.includes('/api/v1/games/hidden-council/launch-token'));
-      return jsonRes({ token: 'fresh-token' }, 200);
-    }, async () => {
-      const p = new platform.Platform();
-      p.token = 'stale'; p.gameSlug = 'hidden-council';
-      clearTimeout(p._refreshTimer);
-      await p.refreshToken();
-      assert.strictEqual(p.token, 'fresh-token');
-    });
-  });
-
-  await test('platform: nickname from users/{id}/profile, Player-id8 fallback, never username', async () => {
-    await withFetch(async (url) => {
-      if (url.includes('/users/u1/profile')) return jsonRes({ id: 'u1', username: 'ada_lovelace', nickname: 'Ada' }, 200);
-      return jsonRes({ error: 'not found' }, 404);
-    }, async () => {
-      const p = new platform.Platform();
-      p.token = 'tk';
-      assert.strictEqual(await p.profileFor('u1'), 'Ada');       // nickname, not username
-      assert.strictEqual(await p.profileFor('u2'), 'Player u2'); // 404 -> fallback
-      assert.strictEqual(p.displayName, null);
-      p.sub = 'u1';
-      await p.fetchProfile();
-      assert.strictEqual(p.displayName, 'Ada');
-    });
-  });
-
-  await test('platform: cloud save pushes zip+base64 (doc survives the round trip)', async () => {
-    const doc = { v: 1, data: { sessions: 3 }, sum: 123 };
-    let pushed = null;
-    await withFetch(async (url, opts) => {
-      if (opts.method === 'PUT') {
-        pushed = JSON.parse(opts.body);
-        return jsonRes({ ok: true }, 200);
+  // Platform over the shared SDK: a StarHermit instance built against a fake
+  // window (launch fragment) and an in-memory backend.
+  const SDK = require('../starhermit-sdk.js');
+  const makeBackend = () => {
+    const calls = [];
+    const saves = {};
+    const settings = {};
+    const fetch = async (url, init = {}) => {
+      const method = init.method || 'GET';
+      const body = init.body ? JSON.parse(init.body) : undefined;
+      calls.push({ method, url, body, auth: init.headers && (init.headers.Authorization || init.headers.authorization) });
+      const r = (st, b) => new Response(b, { status: st });
+      if (url.includes('/cloud-saves/')) {
+        const key = decodeURIComponent(url.split('/cloud-saves/')[1]);
+        if (method === 'PUT') { saves[key] = Buffer.from(body.dataBase64, 'base64'); return r(200, '{}'); }
+        return saves[key] ? r(200, saves[key]) : r(404, '');
       }
-      return jsonRes({ error: 'x' }, 404);
-    }, async () => {
-      const p = new platform.Platform();
-      p.token = 'tk'; p.gameSlug = 'hidden-council';
-      p.syncSave(doc);
-      clearTimeout(p._cloudTimer);           // skip the debounce
-      await p._pushCloudSave(false);
-      assert(pushed && typeof pushed.dataBase64 === 'string');
-      const zipBytes = platform._zip.base64ToBytes(pushed.dataBase64);
-      const back = JSON.parse(new TextDecoder().decode(platform._zip.unzipFirstEntry(zipBytes)));
-      assert.deepStrictEqual(back, doc);
-      assert.strictEqual(p.syncStatus, 'synced');
-    });
+      if (url.endsWith('/users/u1/profile')) return r(200, JSON.stringify({ username: 'ada_lovelace', nickname: 'Ada' }));
+      if (/\/settings$/.test(url)) {
+        if (method === 'PATCH') Object.assign(settings, body.settings);
+        return r(200, JSON.stringify({ settings }));
+      }
+      if (url.endsWith('/controls')) return r(200, JSON.stringify({ actions: [{ action: 'hint', codes: ['KeyJ'] }] }));
+      return r(404, '');
+    };
+    return { calls, saves, settings, fetch };
+  };
+  const makePlatform = (hash, be, hostname = 'localhost') => {
+    let replaced = null;
+    const win = { location: { hash, search: '', pathname: '/', hostname, origin: 'https://' + hostname, href: '' }, history: { replaceState: (a, b, u) => { replaced = u; } } };
+    const sdk = SDK.create({ window: win, fetch: be ? be.fetch : async () => { throw new Error('unexpected fetch'); } });
+    const p = new platform.Platform(sdk);
+    return { p, sdk, replaced: () => replaced };
+  };
+  const launch = '#game_token=' + jwtFor({ sub: 'u1', game_scope: 'gid-1', exp: Math.floor(Date.now() / 1000) + 3600 }) + '&session_id=abc';
+
+  await test('platform: launch token read + stripped; slug from game_scope', () => {
+    const be = makeBackend();
+    const { p, replaced } = makePlatform(launch, be);
+    assert.strictEqual(p.hosted, true);
+    assert.strictEqual(p.sub, 'u1');
+    assert.strictEqual(p.gameSlug, 'gid-1');
+    assert.strictEqual(replaced(), '/');
+    p.sh.signOut();   // stop the renewal timer
   });
 
-  await test('platform: syncSave debounces (saving, no immediate PUT); 404 load = none', async () => {
-    let putCount = 0;
-    await withFetch(async (url, opts) => {
-      if (opts.method === 'PUT') { putCount++; return jsonRes({ ok: true }, 200); }
-      return jsonRes({ error: 'none' }, 404);
-    }, async () => {
-      const p = new platform.Platform();
-      p.token = 'tk'; p.gameSlug = 'hidden-council';
-      p.syncSave({ v: 1, data: {}, sum: 1 });
-      assert.strictEqual(p.syncStatus, 'saving');
-      assert.strictEqual(putCount, 0);            // debounced, not yet pushed
-      clearTimeout(p._cloudTimer);
-      await p._pushCloudSave(false);
-      assert.strictEqual(putCount, 1);
-      assert.strictEqual(await p.cloudLoad(), null); // 404 = no remote save
-    });
+  await test('platform: nickname from users/{id}/profile, never username; Bearer on every call', async () => {
+    const be = makeBackend();
+    const { p, sdk } = makePlatform(launch, be);
+    assert.strictEqual(await p.fetchProfile(), 'Ada');
+    assert.strictEqual(p.displayName, 'Ada');
+    assert.strictEqual(await p.profileFor('u2'), 'Player u2');   // 404 -> fallback
+    assert(be.calls.every((c) => c.auth === 'Bearer ' + sdk.token));
+    sdk.signOut();
+  });
+
+  await test('platform: cloud save round-trips through game:<slug>', async () => {
+    const be = makeBackend();
+    const { p, sdk } = makePlatform(launch, be);
+    const doc = { v: 1, data: { sessions: 3 }, sum: 123 };
+    p.syncSave(doc);
+    assert.strictEqual(p.syncStatus, 'saving');
+    await p.flush();
+    const put = be.calls.find((c) => c.method === 'PUT');
+    assert.strictEqual(put.url, '/api/v1/me/cloud-saves/' + encodeURIComponent('game:gid-1'));
+    assert.strictEqual(p.syncStatus, 'synced');
+    assert.deepStrictEqual(await p.cloudLoad(), doc);
+    sdk.signOut();
+  });
+
+  await test('platform: settings KV patch + bindings + invite link', async () => {
+    const be = makeBackend();
+    const { p, sdk } = makePlatform(launch, be);
+    p.patchSettings({ music: 0.3, leftHanded: true });
+    await new Promise((r) => setTimeout(r, 10));
+    const patch = be.calls.find((c) => c.method === 'PATCH');
+    assert.strictEqual(patch.url, '/api/v1/games/gid-1/settings');
+    assert.deepStrictEqual(patch.body, { settings: { music: 0.3, leftHanded: true } });
+    assert.deepStrictEqual(await p.getSettings(), { music: 0.3, leftHanded: true });
+    assert.deepStrictEqual(await p.loadBindings({ hint: ['KeyH'], undo: ['KeyU'] }), { hint: ['KeyJ'], undo: ['KeyU'] });
+    assert(p.inviteLink().endsWith('/game-invite/u1/gid-1'));
+    sdk.signOut();
+  });
+
+  await test('platform: standalone makes no network calls', async () => {
+    let fetched = 0;
+    const win = { location: { hash: '', search: '', pathname: '/', hostname: 'localhost' }, history: { replaceState() {} } };
+    const sdk = SDK.create({ window: win, fetch: async () => { fetched++; throw new Error('no network'); } });
+    const p = new platform.Platform(sdk);
+    assert.strictEqual(p.hosted, false);
+    assert.strictEqual(p.canSignIn(), false);
+    p.syncSave({ v: 1, data: {}, sum: 1 });
+    p.patchSettings({ music: 1 });
+    assert.strictEqual(await p.initHosted(), null);
+    assert.strictEqual(await p.fetchPlatformLeaderboard(), null);
+    assert.deepStrictEqual(await p.getSettings(), {});
+    assert.deepStrictEqual(await p.loadBindings({ hint: ['KeyH'] }), { hint: ['KeyH'] });
+    assert.strictEqual(p.inviteLink(), null);
+    await assert.rejects(p.api('/api/v1/x'));
+    assert.strictEqual(fetched, 0);
+  });
+
+  await test('platform: hosted domain without token offers sign-in', () => {
+    const { p } = makePlatform('', null, 'gid-1.starhermit.com');
+    assert.strictEqual(p.hosted, false);
+    assert.strictEqual(p.canSignIn(), true);
   });
 
   // --- RoomsClient (mocked platform + WebSocket) ------------------------------

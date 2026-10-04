@@ -6,7 +6,7 @@
 import { THEMES, TUTORIALS, JOURNEY } from './content.js';
 import { formatScore } from './util.js';
 import { PRESETS, CATEGORIES, resolve, presetTier, choosePreset, describe } from './gfx.js';
-import { gfxStrings, gfxLocale, fmt } from './i18n-gfx.js';
+import { gfxStrings, gfxLocale, fmt, shStrings } from './i18n-gfx.js';
 
 export class UI {
   constructor(root, app) {
@@ -48,7 +48,12 @@ export class UI {
     this.hud = this.el('div', 'hc-hud');
     this.hud.hidden = true;
 
-    this.root.append(this.canvasWrap, this.hud, this.screenLayer, this.live);
+    // Account toast (invite link copied, signed out) — visible on any screen.
+    this.toastEl = this.el('div', 'hc-toast');
+    this.toastEl.setAttribute('role', 'status');
+    this.toastEl.hidden = true;
+
+    this.root.append(this.canvasWrap, this.hud, this.screenLayer, this.live, this.toastEl);
     this.buildHud();
   }
 
@@ -145,15 +150,31 @@ export class UI {
         addBtn(a.choice === 'skip' ? 'Vote: skip' : 'Vote: ' + playerName(state, a.choice), () => this.app.humanAct({ type: 'vote', choice: a.choice }));
       }
     }
-    if (acts.some((a) => a.type === 'wait')) addBtn('Wait', () => this.app.humanAct({ type: 'wait' }), 'Space');
-    if (this.app.session && this.app.session.practice) addBtn('↩ Undo (U)', () => this.app.undo(), 'u');
-    addBtn('💡 Hint (H)', () => this.app.hint(), 'h');
+    if (acts.some((a) => a.type === 'wait')) addBtn('Wait', () => this.app.humanAct({ type: 'wait' }), this.app.keyLabel ? this.app.keyLabel('wait') : 'Space');
+    const keyOf = (a) => this.app.keyLabel ? this.app.keyLabel(a) : '';
+    if (this.app.session && this.app.session.practice) addBtn('↩ Undo (' + keyOf('undo') + ')', () => this.app.undo(), keyOf('undo'));
+    addBtn('💡 Hint (' + keyOf('hint') + ')', () => this.app.hint(), keyOf('hint'));
 
     this.logEl.innerHTML = '';
     for (const e of state.log.slice(-7)) {
       const li = this.el('li', 'hc-log-' + e.kind, e.text);
       this.logEl.appendChild(li);
     }
+  }
+
+  toast(text) {
+    this.toastEl.textContent = text;
+    this.toastEl.hidden = false;
+    clearTimeout(this._toastT);
+    this._toastT = setTimeout(() => { this.toastEl.hidden = true; }, 3500);
+  }
+
+  inviteFriend() {
+    const T = shStrings();
+    const link = this.app.platform.inviteLink();
+    if (!link) return;
+    const done = (ok) => { this.toast(ok ? T.copied : fmt(T.copyFailed, { link })); this.announce(ok ? T.copied : T.copyFailed.replace('{link}', '')); };
+    try { navigator.clipboard.writeText(link).then(() => done(true), () => done(false)); } catch (e) { done(false); }
   }
 
   caption(text) {
@@ -198,13 +219,22 @@ export class UI {
     row.append(
       this.button('Daily Chime', '', () => this.app.startDaily()),
       this.button('Journey', '', () => this.showScreen(this.journeyScreen(save))),
-      this.button('Hosted Play', '', () => this.showScreen(this.hostedScreen())),
       this.button('Help', '', () => this.showScreen(this.helpScreen())),
     );
+    // Hosted Play needs StarHermit realtime rooms: shown only when signed in.
+    if (this.app.platform && this.app.platform.hosted) {
+      row.insertBefore(this.button('Hosted Play', '', () => this.showScreen(this.hostedScreen())), row.lastChild);
+    }
     s.appendChild(row);
     const prof = this.el('div', 'hc-profile');
     if (this.app.platform && this.app.platform.hosted) {
       // Hosted: the name comes from the platform profile, not a free-text box.
+      if (this.app.platform.avatar) {
+        const img = this.el('img', 'hc-avatar');
+        img.src = this.app.platform.avatar;
+        img.alt = '';
+        prof.appendChild(img);
+      }
       prof.append(
         this.el('label', '', 'Tinkerer: '),
         this.el('strong', '', this.app.platform.displayName || '…'),
@@ -222,6 +252,21 @@ export class UI {
     s.appendChild(prof);
     const settingsBtn = this.button('⚙ Settings', 'hc-subtle', () => this.showScreen(this.settingsScreen()));
     s.appendChild(settingsBtn);
+    const plat = this.app.platform;
+    if (plat && (plat.hosted || plat.canSignIn())) {
+      const acct = this.el('div', 'hc-row hc-account');
+      const T = shStrings();
+      if (plat.hosted) {
+        const inv = this.button(T.invite, 'hc-subtle', () => this.inviteFriend());
+        inv.id = 'hc-invite';
+        acct.appendChild(inv);
+      } else {
+        const sin = this.button(T.signIn, 'hc-subtle', () => plat.signIn());
+        sin.id = 'hc-signin';
+        acct.appendChild(sin);
+      }
+      s.appendChild(acct);
+    }
     return s;
   }
 
@@ -233,8 +278,10 @@ export class UI {
       ['Daily Chime', 'One shared seed per UTC day.', () => this.app.startDaily()],
       ['Practice', 'Any difficulty. Undo allowed. Unranked.', () => this.showScreen(this.practiceScreen())],
       ['Challenge', 'Constrained goals: beat the clock, sure-footed.', () => this.showScreen(this.challengeScreen())],
-      ['Hosted Play', 'Create or join a room with others.', () => this.showScreen(this.hostedScreen())],
     ];
+    if (this.app.platform && this.app.platform.hosted) {
+      modes.push(['Hosted Play', 'Create or join a room with others.', () => this.showScreen(this.hostedScreen())]);
+    }
     for (const [name, desc, fn] of modes) {
       const b = this.button(name, 'hc-mode', fn);
       const d = this.el('div', 'hc-muted', desc);
@@ -324,23 +371,10 @@ export class UI {
   }
 
   hostedScreen() {
-    const hosted = this.app.platform && this.app.platform.hosted;
     const s = this.screen('Hosted Play');
-    s.appendChild(this.el('p', 'hc-muted', hosted
-      ? 'Create a council or quick-join an open one. The room is routed by StarHermit; the tab that creates it runs the station.'
-      : 'Create a private room or quick-join. Works when served by server.js.'));
+    s.appendChild(this.el('p', 'hc-muted', 'Create a council or quick-join an open one. The room is routed by StarHermit; the tab that creates it runs the station.'));
     s.appendChild(this.button('Create Room', 'hc-mode', () => this.app.hostedCreate()));
     s.appendChild(this.button('Quick Join', 'hc-mode', () => this.app.hostedQuickJoin()));
-    if (hosted) {
-      s.appendChild(this.el('p', 'hc-muted', 'Room codes are a local-play feature — on-platform, others join with Quick Join.'));
-    } else {
-      const row = this.el('div', 'hc-row');
-      const code = this.el('input', 'hc-name');
-      code.placeholder = 'ROOM CODE'; code.maxLength = 6;
-      code.setAttribute('aria-label', 'Room code');
-      row.append(code, this.button('Join', '', () => this.app.hostedJoin(code.value)));
-      s.appendChild(row);
-    }
     this.lobbyEl = this.el('div', 'hc-lobby');
     s.appendChild(this.lobbyEl);
     s.appendChild(this.button('← Back', 'hc-subtle', () => this.app.showModeSelect()));
@@ -595,7 +629,6 @@ export class UI {
     } else if (meta && meta.leaderboard === null) {
       s.appendChild(this.el('p', 'hc-muted', 'Global board unavailable (offline).'));
     }
-    if (meta && meta.leaderboardError) s.appendChild(this.el('p', 'hc-muted', 'Leaderboard: ' + meta.leaderboardError));
 
     s.append(
       this.button('↻ Retry', 'hc-mode', () => this.app.retry()),
@@ -625,7 +658,10 @@ export class UI {
       ['Tasks', 'Stand in a room with an unfinished task and choose its action. Finish every task to win as crew.'],
       ['Incidents', 'Find a silenced tinkerer? Report it (⚠) to convene the council.'],
       ['Voting', 'During a council, vote to eject a suspect or skip. Majority decides.'],
-      ['Keys', 'Enter confirm · Esc pause/cancel · U undo (practice) · H hint · C camera reset'],
+      ['Keys', (() => {
+        const k = (a) => (this.app.keyLabel ? this.app.keyLabel(a) : a);
+        return `${k('commit')} confirm · ${k('pause')} pause/cancel · ${k('undo')} undo (practice) · ${k('hint')} hint · ${k('camera')} camera reset · ${k('wait')} wait`;
+      })()],
     ];
     for (const [t, d] of cards) {
       const c = this.el('div', 'hc-card');

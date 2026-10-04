@@ -122,7 +122,10 @@ export function unlockAchievements(save, keys) {
 // Server time sync
 // ---------------------------------------------------------------------------
 
+// Only with a launch token: standalone play makes no own-server requests and
+// keeps the local clock.
 export async function syncServerTime(token) {
+  if (!token) return { offset: 0, rtt: 0, ok: false };
   try {
     const t0 = Date.now();
     const headers = token ? { authorization: `Bearer ${token}` } : {};

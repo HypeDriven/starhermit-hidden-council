@@ -13,7 +13,13 @@ import {
 import { Platform } from './platform.js';
 import { RoomsClient } from './net.js';
 import { legalActions, STATION_ROOMS } from './rules.js';
+import { shStrings } from './i18n-gfx.js';
 import { THEMES, dailyStage, practiceStage, challengeStage, JOURNEY } from './content.js';
+
+const DEFAULT_BINDINGS = {
+  pause: ['Escape'], undo: ['KeyU'], hint: ['KeyH'], camera: ['KeyC'], wait: ['Space'],
+  commit: ['Enter', 'NumpadEnter'], prevTarget: ['ArrowLeft', 'ArrowUp'], nextTarget: ['ArrowRight', 'ArrowDown'],
+};
 
 class App {
   constructor(root) {
@@ -28,16 +34,23 @@ class App {
     this.session = null;
     this.stage = null;
     this.serverOffset = 0;
-    this.ws = null;          // legacy dev server (server.js) socket, no-token path
     this.net = null;         // RoomsClient while a platform room is active
     this.hostedSeatId = null;
     this.focusIndex = 0;
+    // Keyboard bindings: defaults mirror the control.* lines in starhermit.txt;
+    // StarHermit.loadBindings applies the player's platform overrides.
+    this.bindings = JSON.parse(JSON.stringify(DEFAULT_BINDINGS));
+    this.platform.loadBindings(DEFAULT_BINDINGS).then((b) => { this.bindings = b; });
+    this.platform.onAuth = (signedIn) => {
+      if (!signedIn) this.ui.toast(shStrings().signedOut);
+      if (this.phase === 'title') this.showTitle();
+    };
 
     this.applyAccessibilityClasses();
     this.bindGlobalInput();
     this.bindLifecycle();
 
-    syncServerTime(this.platform.token).then((r) => { this.serverOffset = r.offset; });
+    syncServerTime(this.platform.hosted ? this.platform.token : null).then((r) => { this.serverOffset = r.offset; });
 
     if (this.platform.hosted) this.initHosted();
 
@@ -55,6 +68,13 @@ class App {
       if (this.platform.displayName) this.save.profile.name = this.platform.displayName;
       this.persistSave();   // rewrite the local cache (+ cloud mirror when merged)
       if (this.phase === 'title') this.showTitle();
+    }).then(() => this.platform.getSettings()).then((remote) => {
+      // Platform settings KV wins over the local defaults when signed in.
+      if (remote && typeof remote === 'object' && Object.keys(remote).length) {
+        Object.assign(this.settings, remote);
+        this.applySettings(false);
+        if (this.phase === 'title') this.showTitle();
+      }
     });
   }
 
@@ -83,9 +103,9 @@ class App {
     this.platform.syncSave({ v: 1, data: this.save, sum: saveChecksum(this.save) });
   }
 
-  /** True while any authoritative hosted session is live (legacy or rooms). */
+  /** True while an authoritative hosted (platform room) session is live. */
   hostedActive() {
-    return (this.ws && this.ws.readyState === 1) || !!(this.net && this.net.inGame);
+    return !!(this.net && this.net.inGame);
   }
 
   // ------------------------------------------------------------- screens --
@@ -225,7 +245,6 @@ class App {
   leaveGame() {
     this.hostedSession = false;
     if (this.session) { this.session.pause(); this.session = null; }
-    if (this.ws) { try { this.ws.close(); } catch (e) {} this.ws = null; }
     if (this.net) { this.net.leave(); this.net = null; }
     this.showTitle();
   }
@@ -296,12 +315,6 @@ class App {
       else this.net.sendCommand(this.session.makeCmd(fields));
       return;
     }
-    if (this.ws && this.ws.readyState === 1) {
-      // Hosted on the dev server: send to authoritative server.
-      const cmd = this.session.makeCmd(fields);
-      this.ws.send(JSON.stringify({ type: 'command', command: cmd }));
-      return;
-    }
     this.session.act(fields);
   }
 
@@ -352,32 +365,16 @@ class App {
         });
         return;
       }
-      this.submitScore(result, (err) => {
-        this.phase = 'results';
-        this.audio.event(won ? 'win' : 'lose', 9);
-        if (fresh && fresh.length) setTimeout(() => this.audio.event('achievement', 11), 700);
-        this.ui.showScreen(this.ui.resultsScreen(result, this.stage, fresh, { leaderboardError: err }));
-      });
+      // Standalone: results, bests and achievements stay on this device.
+      this.phase = 'results';
+      this.audio.event(won ? 'win' : 'lose', 9);
+      if (fresh && fresh.length) setTimeout(() => this.audio.event('achievement', 11), 700);
+      this.ui.showScreen(this.ui.resultsScreen(result, this.stage, fresh, {}));
     } else {
       this.phase = 'results';
       this.audio.event(won ? 'win' : 'lose', 9);
       this.ui.showScreen(this.ui.resultsScreen(result, this.stage, [], {}));
     }
-  }
-
-  submitScore(result, done) {
-    if (this.stage && this.stage.practice) return done(null);
-    try {
-      fetch('/api/v1/scores', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          name: this.save.profile.name, score: result.score.total, seed: result.seed | 0,
-          rulesVersion: result.rulesVersion, contentVersion: result.contentVersion,
-          assists: !!this.assists, durationMs: Math.max(1000, result.elapsed * 600),
-          daily: !!(this.stage && this.stage.id.startsWith('daily-')),
-        }),
-      }).then((r) => r.json()).then((b) => done(b && b.error ? b.error : null)).catch(() => done('offline'));
-    } catch (e) { done('offline'); }
   }
 
   // ------------------------------------------------------------- hosted --
@@ -441,24 +438,6 @@ class App {
     });
   }
 
-  hostedConnect(onOpen) {
-    if (this.ws && this.ws.readyState === 1) return onOpen();
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    try {
-      this.ws = new WebSocket(proto + '://' + location.host + '/ws');
-    } catch (e) {
-      this.ui.caption('Hosted play requires server.js');
-      return;
-    }
-    this.ws.onopen = onOpen;
-    this.ws.onerror = () => this.ui.caption('Connection failed — is server.js running?');
-    this.ws.onmessage = (ev) => {
-      let msg;
-      try { msg = JSON.parse(ev.data); } catch (e) { return; }
-      this.onHostedMessage(msg);
-    };
-  }
-
   applyHostedState(state, notes) {
     if (!this.session) return;
     // The host's session is the live authority; never overwrite it with the
@@ -468,53 +447,36 @@ class App {
     if (this.session.state.phase === 'over' && this.phase !== 'results') this.session.finish();
   }
 
+  // Hosted play exists only on-platform (StarHermit realtime rooms); the UI
+  // hides it without a launch token.
   hostedCreate() {
-    if (this.platform.hosted) {
-      this.net = this._makeNet();
-      this.net.createRoom().catch((e) => {
-        this.ui.caption('Could not create a room — try again.');
-        this.net = null;
-      });
-      return;
-    }
-    this.hostedConnect(() => this.ws.send(JSON.stringify({ type: 'create', name: this.save.profile.name })));
+    if (!this.platform.hosted) return;
+    this.net = this._makeNet();
+    this.net.createRoom().catch(() => {
+      this.ui.caption('Could not create a room — try again.');
+      this.net = null;
+    });
   }
 
   hostedQuickJoin() {
-    if (this.platform.hosted) {
-      this.net = this._makeNet();
-      this.net.quickJoin().then((ok) => { if (!ok) this.net = null; }).catch((e) => {
-        this.ui.caption('Quick join failed — try again.');
-        this.net = null;
-      });
-      return;
-    }
-    this.hostedConnect(() => this.ws.send(JSON.stringify({ type: 'quickjoin', name: this.save.profile.name })));
-  }
-
-  hostedJoin(code) {
-    if (this.platform.hosted) {
-      // The platform quick-join flow has no room-code entry; codes remain a
-      // local-play (server.js) feature.
-      this.ui.caption('Room codes are local-play only — use Quick Join here.');
-      return;
-    }
-    this.hostedConnect(() => this.ws.send(JSON.stringify({ type: 'join', code, name: this.save.profile.name })));
+    if (!this.platform.hosted) return;
+    this.net = this._makeNet();
+    this.net.quickJoin().then((ok) => { if (!ok) this.net = null; }).catch(() => {
+      this.ui.caption('Quick join failed — try again.');
+      this.net = null;
+    });
   }
 
   hostedAddAi() {
-    if (this.net) { if (this.net.isHost) this.net.addAi(); return; }
-    if (this.ws) this.ws.send(JSON.stringify({ type: 'addAi' }));
+    if (this.net && this.net.isHost) this.net.addAi();
   }
 
   hostedReady() {
-    if (this.net) { this.net.setReady(); return; }
-    if (this.ws) this.ws.send(JSON.stringify({ type: 'ready', ready: true }));
+    if (this.net) this.net.setReady();
   }
 
   hostedStart() {
-    if (this.net) { if (this.net.isHost) this.net.start(); return; }
-    if (this.ws) this.ws.send(JSON.stringify({ type: 'start' }));
+    if (this.net && this.net.isHost) this.net.start();
   }
 
   hostedLeave() {
@@ -568,36 +530,48 @@ class App {
     }
   }
 
+  /** Action bound to a KeyboardEvent.code, or null. */
+  actionFor(code) {
+    for (const a of Object.keys(this.bindings)) if (this.bindings[a].includes(code)) return a;
+    return null;
+  }
+
+  /** Short label of the first key bound to an action (for button hints). */
+  keyLabel(action) {
+    const c = (this.bindings[action] || [])[0] || '';
+    if (/^Key[A-Z]$/.test(c)) return c.slice(3);
+    if (/^Digit\d$/.test(c)) return c.slice(5);
+    return c.replace(/^Arrow/, '');
+  }
+
   bindGlobalInput() {
     window.addEventListener('keydown', (e) => {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
-      if (e.key === 'Escape') {
+      const act = this.actionFor(e.code);
+      if (act === 'pause') {
         if (this.phase === 'active') { this.pauseGame(); e.preventDefault(); }
         else if (this.phase === 'paused') { this.resumeGame(); e.preventDefault(); }
         return;
       }
       if (this.phase !== 'active') return;
-      if (e.key === 'u' || e.key === 'U') { this.undo(); e.preventDefault(); }
-      if (e.key === 'h' || e.key === 'H') { this.hint(); e.preventDefault(); }
-      if (e.key === 'c' || e.key === 'C') { if (this.renderer) this.renderer.resetCamera(); e.preventDefault(); }
-      if (e.key === ' ' || e.key === 'Enter') {
-        // Confirm first priority action (task/report > wait) via keyboard.
-        if (e.key === ' ') { this.humanAct({ type: 'wait' }); e.preventDefault(); }
-      }
-      if (e.key.startsWith('Arrow')) {
-        // Cycle among legal move targets; Enter commits.
+      if (act === 'undo') { this.undo(); e.preventDefault(); }
+      if (act === 'hint') { this.hint(); e.preventDefault(); }
+      if (act === 'camera') { if (this.renderer) this.renderer.resetCamera(); e.preventDefault(); }
+      if (act === 'wait') { this.humanAct({ type: 'wait' }); e.preventDefault(); }
+      if (act === 'prevTarget' || act === 'nextTarget') {
+        // Cycle among legal move targets; Commit (or Shift + next target) moves.
         const legal = this.session ? this.session.legal().filter((a) => a.type === 'move') : [];
         if (legal.length) {
-          this.focusIndex = (this.focusIndex + (e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1) + legal.length) % legal.length;
+          this.focusIndex = (this.focusIndex + (act === 'prevTarget' ? -1 : 1) + legal.length) % legal.length;
           const room = legal[this.focusIndex].room;
           if (this.renderer) { this.renderer.showLegalTargets([room]); this.renderer.placeCamera(room, false); }
           this.ui.caption('Target: ' + room);
           this.audio.event('ack', this.focusIndex);
-          if (e.key === 'ArrowDown' && e.shiftKey) this.humanAct({ type: 'move', room });
+          if (act === 'nextTarget' && e.shiftKey) this.humanAct({ type: 'move', room });
         }
         e.preventDefault();
       }
-      if (e.key === 'Enter') {
+      if (act === 'commit') {
         const legal = this.session ? this.session.legal().filter((a) => a.type === 'move') : [];
         if (legal.length) { this.humanAct({ type: 'move', room: legal[this.focusIndex % legal.length].room }); e.preventDefault(); }
       }
@@ -629,8 +603,12 @@ class App {
     b.dataset.gfxPreset = g.preset && g.preset !== 'auto' ? g.preset : 'auto-' + this.gpuInfo().detected;
   }
 
-  applySettings() {
+  applySettings(mirror = true) {
     storeSettings(this.settings);
+    if (mirror && this.platform.hosted) {   // per-player settings KV (debounced: sliders fire per tick)
+      clearTimeout(this._kvTimer);
+      this._kvTimer = setTimeout(() => this.platform.patchSettings(this.settings), 600);
+    }
     this.applyAccessibilityClasses();
     for (const bus of ['music', 'effects', 'ambience', 'voice']) this.audio.setVolume(bus, this.settings[bus]);
     if (this.renderer) {

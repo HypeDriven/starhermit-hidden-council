@@ -25,28 +25,28 @@ station's tasks, and work out which of you is winding the machine backwards.
 
 | Path | Responsibility |
 |---|---|
-| `index.html` | Entry point: `#app`, `bundle.css`, deferred `bundle.js`, `favicon.svg`, viewport-fit=cover. |
+| `index.html` | Entry point: `#app`, `bundle.css`, deferred `starhermit-sdk.js` then `bundle.js`, `favicon.svg`, viewport-fit=cover. |
+| `starhermit-sdk.js` | Shared StarHermit client (`window.StarHermit`), an unmodified copy of `tools/starhermit-sdk.js`; shipped beside `bundle.js`, not bundled. |
 | `src/rules.js` | Pure deterministic rules engine — state, legal actions, resolution, AI, scoring, replay. No DOM, no THREE. |
 | `src/content.js` | Versioned content (`CONTENT_VERSION = 3`): 5 themes, 3 tutorials, 40 journey stages, daily/practice/challenge builders, offline stage validator. |
 | `src/session.js` | Session driver: solo loop, AI scheduling, undo stack, save/settings persistence, achievements, server-time sync, replay export. |
 | `src/ui.js` | Semantic DOM shell: HUD rails, screens, settings, live regions, results table. Issues commands only through the session. |
 | `src/render.js` | Three.js station: procedural rooms, pawns, gears, lamps, dust motes, camera framing, graphics settings (shadows, IBL, EffectComposer post chain, adaptive resolution, FPS readout), picking, context-loss recovery. |
 | `src/gfx.js` | Pure graphics quality model: presets, per-category overrides, GPU detection (`detectPreset`/`autoPreset`), `resolve()`, `presetTier()`, `choosePreset()`, `describe()`. |
-| `src/i18n-gfx.js` | Localized strings for the Graphics settings section (en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT). |
+| `src/i18n-gfx.js` | Localized strings for the Graphics settings section and the StarHermit account UI (en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT). |
 | `src/audio.js` | WebAudio engine: 4 buses, authored Opus one-shots with synth fallback, ambience bed, generative music stem, captions. |
 | `src/main.js` | App state machine, input binding, platform/cloud wiring, hosted rooms (platform) + legacy dev-socket client, settings application. |
-| `src/platform.js` | StarHermit adapter: launch-token read/strip + 45-min refresh, Bearer API, nickname resolution, zip+base64 cloud-save mirror, read-only leaderboard. No-ops offline. |
+| `src/platform.js` | StarHermit adapter over `window.StarHermit`: sign-in, nickname/avatar, cloud-save mirror, settings KV, key bindings, invite link, read-only leaderboard, authenticated passthrough for rooms. No-ops offline. |
 | `src/net.js` | `RoomsClient`: StarHermit realtime rooms (REST lobby + `/ws/v1/realtime` binary transport), host-routed authority reusing `SoloSession`. |
 | `src/util.js` | Seeded RNG (mulberry32), FNV-1a string hash, formatting helpers. |
-| `server.js` | Zero-dependency local-dev server: static files, `/api/v1/*`, hand-rolled RFC 6455 WebSocket rooms (no-token path only). |
-| `tests/run.js` | 49 unit/integration tests (`npm test`), including real server + raw WebSocket handshakes and mocked platform/rooms adapter tests. |
+| `server.js` | Zero-dependency local-dev server: static files, `/api/v1/time`, plus legacy score/leaderboard/achievement routes and WebSocket rooms no longer used by the client. |
+| `tests/run.js` | 47 unit/integration tests (`npm test`), including real server + raw WebSocket handshakes and mocked platform/rooms adapter tests. |
 | `tests/gfx.test.mjs` | `node --test` unit tests for `gfx.js` and the Graphics locale tables (run by `npm test` after `run.js`). |
 | `tests/e2e.mjs` | Playwright-core playthrough of the real UI at 1280×800 and 390×844. |
-| `tests/hosted-browser.mjs` | Two-browser hosted-lobby smoke driver. |
 | `sfx/` | 16 authored Opus one-shots + `manifest.txt` (canonical), `manifest.json` (regeneration), `manifest.md`. |
 | `assets/` | `title-keyart.webp`, `council-chamber.webp`. |
 | `coverart.png`, `icon.png`, `favicon.svg` | Platform art referenced by `starhermit.txt` and `index.html`. |
-| `scores.json` | Server-side leaderboard persistence (override with `HC_SCORES_FILE`). |
+| `scores.json` | Legacy `server.js` leaderboard persistence (unused by the client; override with `HC_SCORES_FILE`). |
 
 ---
 
@@ -222,7 +222,7 @@ game and is what the content validator uses.
 | Daily Chime | `dailyStage(date)` | 7 players, 2 saboteurs, 10 tasks, one immutable seed per UTC day, par 90 | **Yes** | Optional |
 | Practice | `practiceStage(d)` | Difficulty 1–5, 5–9 players, 6–14 tasks, undo enabled, score never submitted | No | Undo + hints |
 | Challenge | `challengeStage(kind)` | *Beat the Clock* 55 ticks · *Short Fuse* 40 ticks · *Sure-Footed* 46 moves, all 6 players / 8 tasks | Optional | Optional |
-| Hosted Play | StarHermit realtime rooms (hosted) / `server.js` rooms (local dev) | 6-character room code (local dev), quick-join, addable automata, ready/start, host-routed authoritative state | No | Optional |
+| Hosted Play | StarHermit realtime rooms (signed in only; hidden standalone) | create room, quick-join, addable automata, ready/start, host-routed authoritative state | No | Optional |
 
 **Difficulty curve.** Journey stage *i* raises player count every 6 stages, tasks every 3, adds a
 second saboteur on stages where `i % 3 === 0` from stage 10 (and always from stage 29), shortens the elimination cooldown by band,
@@ -439,52 +439,60 @@ listed as unimplemented intent in §16. All formatting already goes through help
 ## 12. StarHermit integration
 
 `starhermit.txt` declares `name`, `launch=index.html`, `owner`, `server=server.js`,
-`version=1.1.0`, `cover=coverart.png` per the conventions at https://wiki.starhermit.com/.
+`version=1.1.0`, `cover=coverart.png` per the conventions at https://wiki.starhermit.com/, plus
+eight keyboard actions (`control.pause=Escape`, `undo=KeyU`, `hint=KeyH`, `camera=KeyC`,
+`wait=Space`, `commit=Enter+NumpadEnter`, `prevTarget=ArrowLeft+ArrowUp`,
+`nextTarget=ArrowRight+ArrowDown`).
 
-**Hosted mode** activates only when a launch token was read from the URL fragment
-`#game_token=<jwt>` (read once, then stripped via `history.replaceState`; query
-`?token=`/`?launch=`/`?launch_token=` remain as local-dev fallbacks). The JWT
-payload (base64url decode, no verify) carries `sub` and `game_scope` (the slug).
-The token is re-minted every 45 min via `POST /api/v1/games/{slug}/launch-token`
-(60 s retry) and sent as `Authorization: Bearer` on every REST call; the
-realtime socket uses `?access_token=`.
+**SDK.** `starhermit-sdk.js` loads before `bundle.js`; `new Platform()` (first thing the App
+does) calls `StarHermit.init()`, which reads the launch token from `#game_token=` (or the
+`#access_token=` sign-in return), strips it, takes the slug from `game_scope` and renews the
+token before expiry. Hosted mode is "the SDK is signed in". If renewal is refused the title
+re-renders without the account UI, a toast says the player is signed out, and play continues
+locally.
 
 **Used**
-* *Identity* — `GET /api/v1/users/{sub}/profile` provides the display nickname
-  (never `/api/v1/me`, never usernames; `"Player " + id8` fallback), shown in the
-  title-screen profile slot with a cloud-sync badge (synced/saving…/offline). The
-  free-text local name remains the offline path.
-* *Cloud save* — the versioned+checksummed save doc mirrors to
-  `GET/PUT /api/v1/me/cloud-saves/{slug}` (one zip+base64 slot via the stored-zip
-  helper; remote wins on conflict through `mergeSaves`). Saves debounce ~2 s and
-  flush on `pagehide`/`visibilitychange`; localStorage stays the offline cache.
-* *Platform time* — `GET /api/v1/time` (Bearer when hosted) is sampled at boot
-  (`syncServerTime`) and the round-trip midpoint decides which UTC day the Daily
-  Chime belongs to; failure degrades to the local clock.
-* *Leaderboards (read-only)* — clients never submit scores. `GET
-  /api/v1/games/{slug}` → `leaderboardId` → `GET /api/v1/leaderboards/{id}/entries`
-  (nicknames resolved via the profile helper, own row marked) renders on the
-  results screen; personal bests live in the cloud-mirrored save. Without a
-  `leaderboardId` or offline, only local records are shown.
-* *Achievements* — local only, part of the cloud-saved doc (no platform unlock
-  endpoint is called; `server.js` is not a Jint game script).
-* *Sessions / multiplayer* — hosted rooms use StarHermit realtime rooms
-  (`src/net.js`): REST lobby (`POST /api/v1/realtime/rooms`, `/open`,
-  `/quick-join`, `/result`, `/leave`, `/mine` for reconnect) and
-  `ws(s)://<host>/ws/v1/realtime?roomId=&access_token=`. The platform prefixes
-  binary frames with a 16-byte sender id (stripped); guest frames reach the host
-  only, host frames everyone. The game's existing JSON messages ride the binary
-  channel (8 KB cap — state logs are trimmed for transport); the creating tab
-  runs the authoritative `SoloSession` and broadcasts snapshots; roster pushes
-  drive the lobby and host-departure detection.
-* *Server script (local dev)* — with no token, `server.js` remains the dev
-  server: its `/api/v1/time`, `/api/v1/scores`, `/api/v1/leaderboard`,
-  `/api/v1/achievements` and the `/ws` room protocol are the local-play path and
-  are never called in hosted mode.
+* *Sign-in* — on `<id>.starhermit.com` without a token the title shows **Sign in with
+  StarHermit** (`StarHermit.signIn()`); hidden when signed in and when running locally.
+* *Identity* — the profile nickname (`GET /api/v1/users/{sub}/profile`, never `/api/v1/me`,
+  `"Player " + id` fallback) and avatar fill the title-screen profile slot with a cloud-sync
+  badge (synced/saving…/offline). The free-text local name remains the offline path.
+* *Cloud save* — the versioned+checksummed save doc mirrors to the slot `game:<slug>` via the
+  SDK (remote wins on load through `mergeSaves`; ~2 s debounce, keepalive flush on
+  `pagehide`/hidden). localStorage stays the offline cache.
+* *Settings KV* — every settings change (volumes, theme, graphics, accessibility, left-handed,
+  hold-to-confirm, hints, camera) is mirrored with `patchSettings` (debounced 600 ms); on start
+  the platform values are applied over the local ones.
+* *Controls* — `keydown` routes by `event.code` through `StarHermit.loadBindings`; the HUD
+  Undo/Hint labels and the Help "Keys" line show the effective keys.
+* *Invite link* — **Invite a friend** on the title (signed in only) copies
+  `StarHermit.inviteLink()` and confirms with a toast.
+* *Platform time* — signed in only, `GET /api/v1/time` (Bearer) is sampled at boot
+  (`syncServerTime`) and decides which UTC day the Daily Chime belongs to; failure degrades to
+  the local clock. Standalone (no launch token) the game makes no own-server requests at all
+  and uses the local clock.
+* *Leaderboards (read-only)* — the first platform board (`StarHermit.leaderboard()`, nicknames
+  via the profile route, own row marked) renders on the results screen when one exists;
+  otherwise only local records are shown. Clients never submit scores.
+* *Realtime rooms* — hosted play uses StarHermit realtime rooms (`src/net.js`): REST lobby
+  (`POST /api/v1/realtime/rooms`, `/open`, `/quick-join`, `/result`, `/leave`, `/mine` for
+  reconnect) through `Platform.api()` (Bearer with the SDK's current token) and
+  `ws(s)://<host>/ws/v1/realtime?roomId=&access_token=`. The platform prefixes binary frames
+  with a 16-byte sender id (stripped); the creating tab runs the authoritative `SoloSession`
+  and broadcasts snapshots; roster pushes drive the lobby and host-departure detection.
+* *Server script* — the client no longer calls `server.js`'s `/api/v1/scores`,
+  `/api/v1/leaderboard`, `/api/v1/achievements` or its `/ws` room protocol. Hosted Play is
+  shown only when signed in (StarHermit realtime rooms); standalone results, bests and
+  achievements stay local. `server.js` remains a dev/static server exercised by `tests/run.js`.
 
-**Not used**: platform presence/friends feeds, chat or moderation services, entitlements,
-purchases, friend invites (quick-join only; room codes are local-dev), and score
-submission (read-only boards by design).
+Account strings (sign-in, invite, toasts) are localized in all nine locales in
+`src/i18n-gfx.js` (`shStrings`).
+
+**Not used**: `server.js` is not a platform game script, so platform game sessions
+(`connect`, AI sessions), matchmaking queues, session invites/friends picker, session chat,
+replays and platform achievements have nothing to drive them; achievements stay local in the
+cloud-saved doc. Room invites to friends are not offered (quick-join only). Voice is out of
+scope.
 
 ---
 
@@ -510,7 +518,7 @@ pagehide flush); localStorage stays the offline cache.
 **Resilience.** WebGL absence is detected before the renderer is built and routes to a
 Compatibility screen that keeps the DOM game fully playable; `webglcontextlost` is prevented and
 `webglcontextrestored` rebuilds the scene; renderer construction failure sets `failed` and the app
-continues without a canvas. Fetches to `/api/v1/*` degrade to offline behaviour. Missing SFX fall
+continues without a canvas. Signed-in fetches to `/api/v1/*` degrade to offline behaviour. Missing SFX fall
 back to synthesis; missing images are removed from the DOM.
 
 **Performance budgets.** One `requestAnimationFrame` loop, paused when the document is hidden.
@@ -520,8 +528,8 @@ materials, textures and the composer are disposed on teardown. The bundle is ~75
 (Three.js dominates); `bundle.css` is 8 KB; the 16 Opus clips total ~350 KB and load lazily; the
 two WebP images total ~102 KB.
 
-**How the e2e drives the real UI.** `tests/e2e.mjs` starts a minimal static server with
-`/api/v1/time` and score stubs, launches headless Chrome via `playwright-core`, and clicks only
+**How the e2e drives the real UI.** `tests/e2e.mjs` starts a minimal static server (no API stubs;
+standalone it fails on any same-origin `/api` or `/ws` request and checks Hosted Play is hidden), launches headless Chrome via `playwright-core`, and clicks only
 visible buttons: title → mode select → each menu screen → Daily Chime → countdown → up to ~120
 HUD actions chosen from the actually-rendered "Go:", "Do:", "⚠ Report", "Vote:" and "Wait"
 buttons (using a BFS mirror of the room graph purely to pick which visible move button to press)
@@ -529,14 +537,16 @@ buttons (using a BFS mirror of the room graph purely to pick which visible move 
 progression check → retry → Esc → Graphics section (Auto detects Low, Low → Ultra → High with
 `data-gfx-preset` and summary checks, a bloom override, the FPS readout, persistence, preset
 clears overrides) → leave → reload → Settings shows the saved graphics, keyboard changes the
-preset, and the panel fits the viewport. It runs the whole flow twice, at 1280×800 and at
+preset, and the panel fits the viewport → StarHermit: standalone makes no platform call and shows
+no account buttons; a `#game_token=` launch against a stubbed API (`page.route`) shows the nickname,
+strips the token, loads `game:<slug>`, and clicking Invite a friend shows an on-screen toast. It runs the whole flow twice, at 1280×800 and at
 390×844 with touch, and fails on any console error or page error.
 
 ---
 
 ## 14. Testing and acceptance criteria
 
-`npm test` (`tests/run.js`, 49 tests, zero dependencies) covers: initial-state shape and
+`npm test` (`tests/run.js`, 47 tests, zero dependencies) covers: initial-state shape and
 serializability; legal-action sets per role and phase; move legality (`not_linked`, `bad_room`);
 task rules (`wrong_room`, `task_done`, `not_crew`); the elimination witness rule and cooldown;
 report/meeting flow; vote tallying, majority, ties and skip; every terminal condition and its
@@ -545,9 +555,10 @@ serialization round-trip and v0→v1 migration; replay hash equality for identic
 a bounded full simulation; a malformed-command fuzz pass that must never throw or produce NaN;
 "AI commands are always legal"; content shape for all 40 journey stages; that stage goal limits
 reach the rules config; theme/tutorial/daily determinism; the validator passing every journey
-stage and seven days of dailies and rejecting defective stages; the platform adapter (zip
-round-trip, JWT decode, fragment read/strip + query fallback, Bearer on every call, token
-refresh swap, nickname + fallback, cloud debounce/push/load) and the rooms client (REST create
+stage and seven days of dailies and rejecting defective stages; the platform adapter over the
+SDK with a stubbed fetch (fragment read/strip and slug from `game_scope`, nickname + fallback,
+Bearer on every call, cloud save round-trip through `game:<slug>`, settings PATCH, bindings,
+invite link, sign-in offered on the hosted domain, zero fetches standalone) and the rooms client (REST create
 + ws URL, honest quick-join 404, binary guest commands with prefix stripping, seat resolution,
 8 KB wire trimming, host-left detection) with mocked fetch/WebSocket; and live `server.js`
 checks — `/api/v1/time`, static `index.html`, structured 404s, score submit/leaderboard,
@@ -619,9 +630,8 @@ All music and ambience are generated at runtime; the game ships no character ani
   bell with a reported incident.
 * **Hosted results are thin.** The hosted path skips `recordCompletion`, so hosted sessions do not
   advance streaks, achievements or journey records.
-* **Leaderboard trust (local dev).** The local `server.js` board validates scores for
-  plausibility but does not replay them; on-platform the board is read-only (clients cannot
-  submit) and the replay chain is not verified anywhere.
+* **Leaderboard trust.** On-platform the board is read-only (clients cannot submit) and the
+  replay chain is not verified anywhere; standalone there is no shared board.
 * **Undo is snapshot-based** (40 deep) and disabled outside practice/tutorial; it also cannot undo
   an AI turn independently of the player's own.
 

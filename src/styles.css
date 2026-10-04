@@ -178,3 +178,8 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; ov
   background: rgba(10, 11, 18, 0.6); padding: 1px 5px; border-radius: 4px;
 }
 .hc-fps[hidden] { display: none; }
+/* StarHermit account: avatar in the profile slot, invite/sign-in row, toast */
+.hc-avatar { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
+.hc-account { margin-top: 10px; }
+.hc-toast { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 50; max-width: calc(100vw - 32px); padding: 10px 16px; border-radius: 10px; background: #1b1e2e; border: 1px solid #2c3048; color: var(--hc-accent); overflow-wrap: anywhere; text-align: center; }
+.hc-toast[hidden] { display: none; }

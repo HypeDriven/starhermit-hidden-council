@@ -11,12 +11,13 @@
  * The menu buttons that used to build a screen without showing it (Journey,
  * Tutorial, Practice, Challenge, Hosted, Settings, Help) now go through
  * showScreen(); the "menus reachable" step guards that regression. The played
- * mode is the Daily (solo, offline-capable); Hosted Play requires server.js
- * and is covered by tests/run.js instead.
+ * mode is the Daily (solo, offline-capable). Hosted Play needs StarHermit
+ * realtime rooms: hidden standalone, shown signed in (rooms are covered by
+ * tests/run.js with a mocked platform).
  *
- * The embedded server is a minimal static file server plus tiny /api/v1
- * stubs (time + score intake) so client fetches succeed without the
- * platform backend. Hosted Play requires server.js and is not covered.
+ * The embedded server is a minimal static file server (/api answers 404).
+ * Standalone (no launch token) the game must make zero same-origin /api or
+ * /ws requests; the run asserts that before the signed-in step.
  *
  * Run: npm run test:e2e
  */
@@ -25,6 +26,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { launchToken, stubStarHermit } from './starhermit-e2e.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SHOT = (stage, vp) => `/tmp/hidden-council-e2e-${stage}-${vp}.png`;
@@ -54,20 +56,6 @@ const MIME = {
 function startServer() {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
-    // Minimal API stubs so client fetches succeed offline (no console 404s).
-    if (url.pathname === '/api/v1/time') {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ now: Date.now() }));
-      return;
-    }
-    if (url.pathname === '/api/v1/scores' && req.method === 'POST') {
-      req.resume();
-      req.on('end', () => {
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
-      });
-      return;
-    }
     if (url.pathname.startsWith('/api/')) {
       res.writeHead(404, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'not_found' }));
@@ -240,8 +228,15 @@ async function runPass(browser, port, vp) {
     isMobile: mobile,
     locale: 'en-US',
   });
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const page = await context.newPage();
   const errors = [];
+  // Standalone until the signed-in step: no same-origin /api or /ws at all.
+  let standalone = true;
+  page.on('request', (r) => {
+    const u = new URL(r.url());
+    if (standalone && u.hostname === '127.0.0.1' && /^\/(api|ws)(\/|$)/.test(u.pathname)) errors.push('standalone own-server request: ' + r.url());
+  });
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
     // Warnings count too: a broken GL state (e.g. toggling shadows without a
@@ -418,6 +413,29 @@ async function runPass(browser, port, vp) {
       if (box.x < 0 || box.y < 0 || box.x + box.width > vw.width + 1 || box.y + box.height > vw.height + 1) throw new Error('settings panel overflows the viewport');
       await page.getByRole('button', { name: '← Back' }).click();
       await waitForPhase(page, 'title');
+    });
+
+    await step('StarHermit: standalone silent; launch token → nickname, invite toast', async () => {
+      // Standalone: no /api or /ws requests (asserted by the request listener).
+      await page.reload({ waitUntil: 'load' });
+      await waitForPhase(page, 'title');
+      if (await page.locator('#hc-invite, #hc-signin').count()) throw new Error('account buttons shown standalone');
+      if (await page.getByRole('button', { name: 'Hosted Play' }).count()) throw new Error('Hosted Play shown standalone');
+      await page.waitForTimeout(200);
+      if (errors.length) throw new Error(errors.join('\n'));
+      standalone = false;
+      const calls = await stubStarHermit(page);
+      await page.goto(`http://127.0.0.1:${port}/index.html#game_token=` + launchToken(), { waitUntil: 'load' });
+      await waitForPhase(page, 'title');
+      await page.waitForFunction(() => /Al/.test(document.querySelector('.hc-profile strong')?.textContent || ''));
+      if (page.url().includes('game_token')) throw new Error('token left in URL');
+      await page.locator('#hc-invite').click();
+      await page.locator('.hc-toast').waitFor({ state: 'visible' });
+      const box = await page.locator('.hc-toast').boundingBox();
+      if (box.x < 0 || box.x + box.width > page.viewportSize().width + 1) throw new Error('toast cut off');
+      if (!calls.some((c) => c.includes('/cloud-saves/game%3Agid-1'))) throw new Error('no cloud-save load: ' + calls.join(', '));
+      if (!(await page.getByRole('button', { name: 'Hosted Play' }).count())) throw new Error('Hosted Play hidden while signed in');
+      await page.unroute(/\/api\/v1\//);
     });
   } finally {
     await context.close();
