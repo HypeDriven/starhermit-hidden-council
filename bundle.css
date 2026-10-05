@@ -16,6 +16,9 @@
 html, body { margin: 0; padding: 0; height: 100%; background: var(--hc-bg); color: var(--hc-text); }
 body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
 #app, .hc-root { height: 100%; position: relative; }
+/* Large screens: the DOM UI layers zoom by --ui-scale (ui-scale.js, 1 up to 1600x1000) with their vh/vw divided by it;
+   the full-viewport 3D canvas is not zoomed. */
+.hc-screens, .hc-hud, .hc-toast, .hc-fps { zoom: var(--ui-scale, 1); }
 
 .sr-only {
   position: absolute; width: 1px; height: 1px; margin: -1px;
@@ -30,7 +33,7 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; ov
 .hc-screens[hidden] { display: none; }
 .hc-screen {
   background: var(--hc-panel); border: 1px solid #2c3048; border-radius: 14px;
-  padding: 28px 32px; max-width: min(560px, 92vw); max-height: 88vh; overflow-y: auto;
+  padding: 28px 32px; max-width: min(560px, calc(92vw / var(--ui-scale, 1))); max-height: calc(88vh / var(--ui-scale, 1)); overflow-y: auto;
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
 }
 .hc-screen-title {
@@ -38,7 +41,7 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; ov
   background-size: cover; background-position: center;
 }
 .hc-hero-img {
-  display: block; width: 100%; max-height: 26vh; object-fit: cover;
+  display: block; width: 100%; max-height: calc(26vh / var(--ui-scale, 1)); object-fit: cover;
   border-radius: 10px; margin: 0 0 12px; border: 1px solid #2c3048;
 }
 .hc-high-contrast .hc-screen-title { background-image: none; }
@@ -83,6 +86,8 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; ov
 .hc-settings { border-top: 1px solid #2c3048; margin-top: 14px; padding-top: 10px; }
 
 .hc-journey { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; margin: 12px 0; }
+/* the shrink-to-fit screen card gives auto-fill no width to fill; size the grid so stages flow into rows */
+.hc-journey { width: min(496px, calc(92vw / var(--ui-scale, 1) - 64px)); }
 .hc-stage { aspect-ratio: 1; padding: 4px; font-size: 0.95rem; }
 .hc-stage.won { border-color: var(--hc-accent); color: var(--hc-accent); }
 
@@ -147,20 +152,20 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; ov
 
 /* Portrait mobile: top status bar + bottom thumb-zone tray */
 @media (max-width: 700px) and (orientation: portrait) {
-  .hc-rail { top: auto; bottom: calc(8px + var(--safe-bottom)); width: auto; left: calc(8px + var(--safe-left)); right: calc(8px + var(--safe-right)); max-height: 38vh; }
-  .hc-rail-left { max-height: 24vh; bottom: auto; top: 60px; transform: none; visibility: visible; }
+  .hc-rail { top: auto; bottom: calc(8px + var(--safe-bottom)); width: auto; left: calc(8px + var(--safe-left)); right: calc(8px + var(--safe-right)); max-height: calc(38vh / var(--ui-scale, 1)); }
+  .hc-rail-left { max-height: calc(24vh / var(--ui-scale, 1)); bottom: auto; top: 60px; transform: none; visibility: visible; }
   .hc-rail-right { transform: none; visibility: visible; }
   .hc-drawer-toggle { display: none; }
   .hc-actions { flex-direction: row; flex-wrap: wrap; }
   .hc-action { flex: 1 1 45%; }
-  .hc-screen { padding: 18px; max-height: 92vh; }
+  .hc-screen { padding: 18px; max-height: calc(92vh / var(--ui-scale, 1)); }
 }
 
 /* Landscape mobile: narrow rail */
 @media (max-height: 500px) and (orientation: landscape) {
   .hc-rail { width: 220px; top: 54px; bottom: calc(8px + var(--safe-bottom)); padding: 8px; font-size: 0.85rem; }
   .btn { min-height: 44px; padding: 6px 12px; }
-  .hc-screen { max-height: 94vh; padding: 14px 18px; }
+  .hc-screen { max-height: calc(94vh / var(--ui-scale, 1)); padding: 14px 18px; }
 }
 
 /* Graphics settings section */
@@ -181,5 +186,5 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; ov
 /* StarHermit account: avatar in the profile slot, invite/sign-in row, toast */
 .hc-avatar { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
 .hc-account { margin-top: 10px; }
-.hc-toast { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 50; max-width: calc(100vw - 32px); padding: 10px 16px; border-radius: 10px; background: #1b1e2e; border: 1px solid #2c3048; color: var(--hc-accent); overflow-wrap: anywhere; text-align: center; }
+.hc-toast { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 50; max-width: calc(calc(100vw / var(--ui-scale, 1)) - 32px); padding: 10px 16px; border-radius: 10px; background: #1b1e2e; border: 1px solid #2c3048; color: var(--hc-accent); overflow-wrap: anywhere; text-align: center; }
 .hc-toast[hidden] { display: none; }

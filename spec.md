@@ -288,6 +288,10 @@ left rail to a 24 vh status panel below the top bar and the right rail to a bott
 (max 38 vh) whose action buttons flow two-up in the thumb zone. Landscape ≤500 px tall narrows
 the rails to 180 px and shrinks screen padding. `env(safe-area-inset-*)` offsets every edge-
 anchored element, and `hc-left-handed` mirrors the two rails.
+Large screens: `ui-scale.js` sets `--ui-scale` on `<html>` (1 up to a 1600×1000 viewport, then the smaller of
+width/1600 and height/1000, capped at 2.5); the screen layer, HUD, toast and frame-rate badge are CSS-`zoom`ed by it
+with their vh/vw lengths divided by it, so menus and rails grow proportionally while the full-viewport 3D canvas is
+not zoomed (the camera fit already measures the zoomed rails).
 
 Never cut off: the pause button, the caption line, the action list (its rail scrolls), the score
 breakdown table (the screen scrolls to `max-height: 88vh`) and the primary button on any screen.
