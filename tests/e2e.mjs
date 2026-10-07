@@ -238,7 +238,9 @@ async function runPass(browser, port, vp) {
     if (standalone && u.hostname === '127.0.0.1' && /^\/(api|ws)(\/|$)/.test(u.pathname)) errors.push('standalone own-server request: ' + r.url());
   });
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  let allowRefused = false;   // the stubbed 401 renewal is logged by the browser itself
   page.on('console', (m) => {
+    if (allowRefused && /status of 401/.test(m.text())) return;
     // Warnings count too: a broken GL state (e.g. toggling shadows without a
     // shader recompile) shows up as warnings while the canvas goes blank.
     if ((m.type() === 'error' || m.type() === 'warning') && !browserNoise.test(m.text())) {
@@ -436,6 +438,26 @@ async function runPass(browser, port, vp) {
       if (!calls.some((c) => c.includes('/cloud-saves/game%3Agid-1'))) throw new Error('no cloud-save load: ' + calls.join(', '));
       if (!(await page.getByRole('button', { name: 'Hosted Play' }).count())) throw new Error('Hosted Play hidden while signed in');
       await page.unroute(/\/api\/v1\//);
+    });
+
+    await step('StarHermit: refused renewal → "Your session expired" → Back to StarHermit', async () => {
+      allowRefused = true;
+      await stubStarHermit(page, { 'POST .*/launch-token$': (route) => route.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"expired"}' }) });
+      // Simulate the token dying: the SDK's renewal is refused by the platform.
+      await page.evaluate(() => window.StarHermit.renewForReconnect());
+      const dlg = page.getByRole('dialog', { name: 'Your session expired' });
+      await dlg.waitFor({ state: 'visible' });
+      const box = await page.locator('.hc-screen').boundingBox();
+      const vw = page.viewportSize();
+      if (box.x < 0 || box.y < 0 || box.x + box.width > vw.width + 1 || box.y + box.height > vw.height + 1) throw new Error('expired dialog overflows the viewport');
+      await page.route('https://dashboard.starhermit.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>launcher</title>' }));
+      await Promise.all([
+        page.waitForURL('https://dashboard.starhermit.com/**'),
+        page.getByRole('button', { name: 'Back to StarHermit' }).click(),
+      ]);
+      await page.unroute('https://dashboard.starhermit.com/**');
+      await page.unroute(/\/api\/v1\//);
+      allowRefused = false;
     });
   } finally {
     await context.close();

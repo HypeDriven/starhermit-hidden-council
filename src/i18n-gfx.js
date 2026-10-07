@@ -101,63 +101,108 @@ const SH_STRINGS = {
     "invite": "Invite a friend",
     "copied": "Invite link copied to clipboard.",
     "copyFailed": "Could not copy the invite link: {link}",
-    "signedOut": "Signed out of StarHermit. Progress keeps saving on this device."
+    "signedOut": "Signed out of StarHermit. Progress keeps saving on this device.",
+    "expiredTitle": "Your session expired",
+    "expiredBody": "Your StarHermit session has expired. Head back to StarHermit to keep playing online — progress keeps saving on this device.",
+    "relaunch": "Back to StarHermit",
+    "offline": "Keep playing offline",
+    "relaunchFailed": "Could not open StarHermit — open it from your library."
   },
   "en-GB": {
     "signIn": "Sign in with StarHermit",
     "invite": "Invite a friend",
     "copied": "Invite link copied to clipboard.",
     "copyFailed": "Could not copy the invite link: {link}",
-    "signedOut": "Signed out of StarHermit. Progress keeps saving on this device."
+    "signedOut": "Signed out of StarHermit. Progress keeps saving on this device.",
+    "expiredTitle": "Your session expired",
+    "expiredBody": "Your StarHermit session has expired. Head back to StarHermit to keep playing online — progress keeps saving on this device.",
+    "relaunch": "Back to StarHermit",
+    "offline": "Keep playing offline",
+    "relaunchFailed": "Could not open StarHermit — open it from your library."
   },
   "es-419": {
     "signIn": "Iniciar sesión con StarHermit",
     "invite": "Invitar a un amigo",
     "copied": "Enlace de invitación copiado al portapapeles.",
     "copyFailed": "No se pudo copiar el enlace de invitación: {link}",
-    "signedOut": "Sesión de StarHermit cerrada. El progreso se sigue guardando en este dispositivo."
+    "signedOut": "Sesión de StarHermit cerrada. El progreso se sigue guardando en este dispositivo.",
+    "expiredTitle": "Tu sesión expiró",
+    "expiredBody": "Tu sesión de StarHermit expiró. Vuelve a StarHermit para seguir jugando en línea; el progreso se sigue guardando en este dispositivo.",
+    "relaunch": "Volver a StarHermit",
+    "offline": "Seguir jugando sin conexión",
+    "relaunchFailed": "No se pudo abrir StarHermit; ábrelo desde tu biblioteca."
   },
   "es-ES": {
     "signIn": "Iniciar sesión con StarHermit",
     "invite": "Invitar a un amigo",
     "copied": "Enlace de invitación copiado al portapapeles.",
     "copyFailed": "No se ha podido copiar el enlace de invitación: {link}",
-    "signedOut": "Se ha cerrado la sesión de StarHermit. El progreso se sigue guardando en este dispositivo."
+    "signedOut": "Se ha cerrado la sesión de StarHermit. El progreso se sigue guardando en este dispositivo.",
+    "expiredTitle": "Tu sesión ha caducado",
+    "expiredBody": "Tu sesión de StarHermit ha caducado. Vuelve a StarHermit para seguir jugando en línea; el progreso se sigue guardando en este dispositivo.",
+    "relaunch": "Volver a StarHermit",
+    "offline": "Seguir jugando sin conexión",
+    "relaunchFailed": "No se ha podido abrir StarHermit; ábrelo desde tu biblioteca."
   },
   "de-DE": {
     "signIn": "Mit StarHermit anmelden",
     "invite": "Freund einladen",
     "copied": "Einladungslink in die Zwischenablage kopiert.",
     "copyFailed": "Einladungslink konnte nicht kopiert werden: {link}",
-    "signedOut": "Von StarHermit abgemeldet. Der Fortschritt wird weiter auf diesem Gerät gespeichert."
+    "signedOut": "Von StarHermit abgemeldet. Der Fortschritt wird weiter auf diesem Gerät gespeichert.",
+    "expiredTitle": "Deine Sitzung ist abgelaufen",
+    "expiredBody": "Deine StarHermit-Sitzung ist abgelaufen. Kehre zu StarHermit zurück, um online weiterzuspielen – der Fortschritt wird weiter auf diesem Gerät gespeichert.",
+    "relaunch": "Zurück zu StarHermit",
+    "offline": "Offline weiterspielen",
+    "relaunchFailed": "StarHermit konnte nicht geöffnet werden – öffne es über deine Bibliothek."
   },
   "fr-FR": {
     "signIn": "Se connecter avec StarHermit",
     "invite": "Inviter un ami",
     "copied": "Lien d’invitation copié dans le presse-papiers.",
     "copyFailed": "Impossible de copier le lien d’invitation : {link}",
-    "signedOut": "Déconnecté de StarHermit. La progression reste enregistrée sur cet appareil."
+    "signedOut": "Déconnecté de StarHermit. La progression reste enregistrée sur cet appareil.",
+    "expiredTitle": "Votre session a expiré",
+    "expiredBody": "Votre session StarHermit a expiré. Revenez sur StarHermit pour continuer à jouer en ligne ; la progression reste enregistrée sur cet appareil.",
+    "relaunch": "Retour à StarHermit",
+    "offline": "Continuer hors ligne",
+    "relaunchFailed": "Impossible d’ouvrir StarHermit : ouvrez-le depuis votre bibliothèque."
   },
   "fr-CA": {
     "signIn": "Se connecter avec StarHermit",
     "invite": "Inviter un ami",
     "copied": "Lien d’invitation copié dans le presse-papiers.",
     "copyFailed": "Impossible de copier le lien d’invitation : {link}",
-    "signedOut": "Déconnecté de StarHermit. La progression reste enregistrée sur cet appareil."
+    "signedOut": "Déconnecté de StarHermit. La progression reste enregistrée sur cet appareil.",
+    "expiredTitle": "Votre session a expiré",
+    "expiredBody": "Votre session StarHermit a expiré. Retournez sur StarHermit pour continuer à jouer en ligne; la progression reste enregistrée sur cet appareil.",
+    "relaunch": "Retour à StarHermit",
+    "offline": "Continuer hors ligne",
+    "relaunchFailed": "Impossible d’ouvrir StarHermit : ouvrez-le depuis votre bibliothèque."
   },
   "pt-BR": {
     "signIn": "Entrar com StarHermit",
     "invite": "Convidar um amigo",
     "copied": "Link de convite copiado para a área de transferência.",
     "copyFailed": "Não foi possível copiar o link de convite: {link}",
-    "signedOut": "Você saiu do StarHermit. O progresso continua salvo neste dispositivo."
+    "signedOut": "Você saiu do StarHermit. O progresso continua salvo neste dispositivo.",
+    "expiredTitle": "Sua sessão expirou",
+    "expiredBody": "Sua sessão do StarHermit expirou. Volte ao StarHermit para continuar jogando online — o progresso continua salvo neste dispositivo.",
+    "relaunch": "Voltar ao StarHermit",
+    "offline": "Continuar jogando offline",
+    "relaunchFailed": "Não foi possível abrir o StarHermit — abra-o pela sua biblioteca."
   },
   "it-IT": {
     "signIn": "Accedi con StarHermit",
     "invite": "Invita un amico",
     "copied": "Link di invito copiato negli appunti.",
     "copyFailed": "Impossibile copiare il link di invito: {link}",
-    "signedOut": "Disconnesso da StarHermit. I progressi restano salvati su questo dispositivo."
+    "signedOut": "Disconnesso da StarHermit. I progressi restano salvati su questo dispositivo.",
+    "expiredTitle": "La sessione è scaduta",
+    "expiredBody": "La tua sessione StarHermit è scaduta. Torna su StarHermit per continuare a giocare online: i progressi restano salvati su questo dispositivo.",
+    "relaunch": "Torna a StarHermit",
+    "offline": "Continua offline",
+    "relaunchFailed": "Impossibile aprire StarHermit: aprilo dalla tua libreria."
   }
 };
 

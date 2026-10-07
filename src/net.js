@@ -50,7 +50,9 @@ export class RoomsClient {
    *         onCaption(text)    — short status lines for the HUD caption,
    *         onAuthorityState(state, events)   — host only: the authority
    *                             advanced (drives the host UI directly),
-   *         onAuthorityReject(reason)         — host only: authority reject }
+   *         onAuthorityReject(reason)         — host only: authority reject,
+   *         onAuthLost()       — the launch token could not be renewed; the
+   *                             client has stopped reconnecting for good }
    */
   constructor(platform, hooks) {
     this.platform = platform;      // provides token, gameSlug, sub, displayName, profileFor
@@ -165,6 +167,13 @@ export class RoomsClient {
     });
   }
 
+  /**
+   * Reconnect with the game's backoff. A dropped socket may be an expired
+   * token (refused before the upgrade, reported only as 1006), so every
+   * attempt renews the launch token first and the URL is rebuilt from the
+   * current token; a transient renewal failure backs off without reopening
+   * the old URL, and a refused renewal stops for good (onAuthLost).
+   */
   _scheduleReconnect() {
     if (this._reconnects >= 5) {
       this._emit({ type: 'error', error: 'connection lost' });
@@ -172,7 +181,14 @@ export class RoomsClient {
     }
     const delay = Math.min(8000, 500 * 2 ** this._reconnects++);
     this._caption('Reconnecting…');
-    setTimeout(() => {
+    const room = this.room;
+    setTimeout(async () => {
+      if (!this.room || this.room !== room) return;   // left meanwhile
+      let r;
+      try { r = await this.platform.renewForReconnect(); } catch (e) { r = 'retry'; }
+      if (!this.room) return;
+      if (r === 'relaunch') { this._authLost(); return; }
+      if (r !== 'renewed') { this._scheduleReconnect(); return; }
       this._api('/api/v1/realtime/rooms/mine')
         .then(async (res) => {
           if (!res.ok) throw new Error(String(res.status));
@@ -184,8 +200,17 @@ export class RoomsClient {
           this._caption('Reconnected.');
           if (this.isHost && this.sim) this._broadcastState();   // catch guests up
         })
-        .catch((e) => this._scheduleReconnect());
+        .catch((e) => { if (this.room) this._scheduleReconnect(); });
     }, delay);
+  }
+
+  /** Renewal refused: stop reconnecting and tell the game to offer relaunch. */
+  _authLost() {
+    this._stopSim();
+    this.room = null;
+    this.ws = null;
+    this.connected = false;
+    this.hooks.onAuthLost?.();
   }
 
   _sendControl(obj) {

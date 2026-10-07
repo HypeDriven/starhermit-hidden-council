@@ -270,6 +270,22 @@ export class UI {
     return s;
   }
 
+  /** Launch token could not be renewed: offer the way back to StarHermit. */
+  sessionExpiredScreen() {
+    const T = shStrings();
+    const s = this.screen(T.expiredTitle);
+    s.classList.add('hc-screen-expired');
+    s.appendChild(this.el('p', 'hc-expired-body', T.expiredBody));
+    const row = this.el('div', 'hc-row');
+    const back = this.button(T.relaunch, 'hc-play', () => {
+      if (!this.app.platform.relaunch()) this.toast(T.relaunchFailed);
+    });
+    back.id = 'hc-relaunch';
+    row.append(back, this.button(T.offline, 'hc-subtle', () => this.app.showTitle()));
+    s.appendChild(row);
+    return s;
+  }
+
   modeSelectScreen() {
     const s = this.screen('Choose Your Session');
     const modes = [

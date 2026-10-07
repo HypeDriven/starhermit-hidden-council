@@ -585,6 +585,111 @@ async function main() {
     });
   });
 
+  // Reconnect: every reopen renews the launch token first (an expired token is
+  // refused before the upgrade and looks like a plain drop).
+  const withFastTimers = async (fn) => {
+    const real = globalThis.setTimeout;
+    globalThis.setTimeout = (f) => real(f, 0);
+    try { return await fn(); } finally { globalThis.setTimeout = real; }
+  };
+  const reconnectRig = (renewResults) => {
+    const log = [];
+    const plat = makeNetPlatform();
+    plat.token = 'old';
+    plat.renewForReconnect = async () => {
+      const r = renewResults.length > 1 ? renewResults.shift() : renewResults[0];
+      log.push('renew:' + r);
+      if (r === 'renewed') plat.token = 'fresh';
+      return r;
+    };
+    return { log, plat };
+  };
+
+  await test('rooms: reconnect renews the token first and reopens with the new one', async () => {
+    const { log, plat } = reconnectRig(['renewed']);
+    await withFastTimers(() => withFetch(async (url) => {
+      log.push('fetch:' + url);
+      return url.endsWith('/rooms/mine') ? jsonRes({ roomId: 'room-7' }, 200) : jsonRes({}, 404);
+    }, () => withWs(async (mock) => {
+      const urls = [];
+      const RealWs = globalThis.WebSocket;
+      globalThis.WebSocket = function (url) { urls.push(url); log.push('ws'); const w = RealWs(url); setImmediate(() => w.onopen && w.onopen()); return w; };
+      const caps = [];
+      const net = new netMod.RoomsClient(plat, { onMessage: () => {}, onCaption: (c) => caps.push(c) });
+      net.room = 'room-7'; net.isHost = false; net.connected = true;
+      net._scheduleReconnect();
+      await waitFor(() => caps.includes('Reconnected.'));
+      assert.deepStrictEqual(log.slice(0, 3), ['renew:renewed', 'fetch:/api/v1/realtime/rooms/mine', 'ws']);
+      assert.strictEqual(urls.length, 1);
+      assert(urls[0].includes('access_token=fresh') && !urls[0].includes('access_token=old'), urls[0]);
+      net.leave();
+    })));
+  });
+
+  await test("rooms: renewal 'retry' backs off without reopening the old URL", async () => {
+    const { log, plat } = reconnectRig(['retry']);
+    await withFastTimers(() => withFetch(async (url) => { log.push('fetch:' + url); return jsonRes({}, 500); }, () => withWs(async () => {
+      let opened = 0;
+      globalThis.WebSocket = function () { opened++; return {}; };
+      const msgs = [];
+      const net = new netMod.RoomsClient(plat, { onMessage: (m) => msgs.push(m), onCaption: () => {} });
+      net.room = 'room-7'; net.connected = true;
+      net._scheduleReconnect();
+      await waitFor(() => msgs.some((m) => m.type === 'error'));
+      assert.strictEqual(opened, 0, 'socket reopened with an unrenewed token');
+      assert(!log.some((l) => l.startsWith('fetch:')), 'rooms/mine called without a renewed token');
+      assert.strictEqual(log.filter((l) => l === 'renew:retry').length, 5);   // existing 5-attempt backoff
+    })));
+  });
+
+  await test("rooms: renewal 'relaunch' stops reconnecting and raises onAuthLost", async () => {
+    const { log, plat } = reconnectRig(['relaunch']);
+    await withFastTimers(() => withFetch(async (url) => { log.push('fetch:' + url); return jsonRes({}, 500); }, () => withWs(async () => {
+      let opened = 0, lost = 0;
+      globalThis.WebSocket = function () { opened++; return {}; };
+      const net = new netMod.RoomsClient(plat, { onMessage: () => {}, onCaption: () => {}, onAuthLost: () => { lost++; } });
+      net.room = 'room-7'; net.connected = true;
+      net.sim = { stopAi: () => {} };
+      net._scheduleReconnect();
+      await waitFor(() => lost === 1);
+      await new Promise((r) => setTimeout(r, 20));
+      assert.strictEqual(opened, 0);
+      assert.deepStrictEqual(log, ['renew:relaunch']);   // no further attempts
+      assert.strictEqual(net.room, null);
+      assert.strictEqual(net.sim, null);
+    })));
+  });
+
+  await test("platform: renewForReconnect/relaunch delegate to the SDK; auth reason reaches onAuth", async () => {
+    const handlers = {};
+    let relaunched = 0;
+    const fakeSdk = {
+      init() {}, on(ev, fn) { handlers[ev] = fn; }, signedIn: false,
+      renewForReconnect: async () => 'retry',
+      relaunch: () => { relaunched++; return true; },
+    };
+    const p = new platform.Platform(fakeSdk);
+    assert.strictEqual(await p.renewForReconnect(), 'retry');
+    assert.strictEqual(p.relaunch(), true);
+    assert.strictEqual(relaunched, 1);
+    const seen = [];
+    p.onAuth = (signedIn, reason) => seen.push([signedIn, reason]);
+    handlers.auth({ signedIn: false, reason: 'expired' });
+    assert.deepStrictEqual(seen, [[false, 'expired']]);
+    const off = new platform.Platform(null);
+    off.sh = null;
+    assert.strictEqual(await off.renewForReconnect(), 'relaunch');
+  });
+
+  await test('i18n: session-expired strings exist in all nine locales', async () => {
+    const { shStrings } = await import('../src/i18n-gfx.js');
+    for (const loc of ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT']) {
+      const T = shStrings(loc);
+      for (const k of ['expiredTitle', 'expiredBody', 'relaunch', 'offline', 'relaunchFailed']) assert(T[k], loc + ' ' + k);
+    }
+    assert.notStrictEqual(shStrings('de-DE').relaunch, shStrings('en-US').relaunch);
+  });
+
   await test('rooms: guest commands ride as binary JSON; host applies them with prefix stripped', () => {
     const plat = makeNetPlatform();
     const { ws, sent } = makeWsMock();

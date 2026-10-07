@@ -17,12 +17,12 @@ export class Platform {
     this.avatar = null;                // object URL of the account avatar
     this.syncStatus = this.hosted ? 'synced' : 'offline';   // offline | saving | synced
     this.onSync = null;                // fn(status) — sync status display hook
-    this.onAuth = null;                // fn(signedIn) — sign-out after a refused renewal
+    this.onAuth = null;                // fn(signedIn, reason) — sign-out after a refused renewal ('expired')
     if (this.sh) {
       this.sh.on('saved', (ok) => this._setSync(ok ? 'synced' : 'offline'));
       this.sh.on('auth', (a) => {
         if (!a.signedIn) { this.nickname = null; this.avatar = null; this.syncStatus = 'offline'; }
-        this.onAuth?.(a.signedIn);
+        this.onAuth?.(a.signedIn, a.reason);
       });
       if (this.hosted && typeof window !== 'undefined' && window.addEventListener) {
         window.addEventListener('pagehide', () => this.flush());
@@ -80,6 +80,18 @@ export class Platform {
 
   /** Realtime-room socket URL with the current token. */
   realtimeSocketUrl(roomId) { return this.sh.realtime.socketUrl(roomId); }
+
+  /**
+   * Call before reopening a realtime socket: resolves 'renewed' (rebuild the
+   * URL from the current token), 'retry' (renewal failed transiently — back
+   * off, do not reopen the old URL) or 'relaunch' (token dead; signed out).
+   */
+  renewForReconnect() {
+    return this.sh && this.sh.renewForReconnect ? this.sh.renewForReconnect() : Promise.resolve('relaunch');
+  }
+
+  /** Back to the launcher / sign-in for a fresh token. Call from a click. */
+  relaunch() { return !!(this.sh && this.sh.relaunch && this.sh.relaunch()); }
 
   /** Re-mint the launch token now (the SDK also does this on its own schedule). */
   refreshToken() { return this.sh ? this.sh.refresh() : Promise.resolve(null); }

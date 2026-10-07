@@ -41,7 +41,8 @@ class App {
     // StarHermit.loadBindings applies the player's platform overrides.
     this.bindings = JSON.parse(JSON.stringify(DEFAULT_BINDINGS));
     this.platform.loadBindings(DEFAULT_BINDINGS).then((b) => { this.bindings = b; });
-    this.platform.onAuth = (signedIn) => {
+    this.platform.onAuth = (signedIn, reason) => {
+      if (!signedIn && reason === 'expired') { this.showSessionExpired(); return; }
       if (!signedIn) this.ui.toast(shStrings().signedOut);
       if (this.phase === 'title') this.showTitle();
     };
@@ -115,6 +116,32 @@ class App {
     this.ui.showHud(false);
     this.teardownRenderer();
     this.ui.showScreen(this.ui.titleScreen(this.save, this.settings));
+  }
+
+  /**
+   * The launch token died (renewal refused, or a realtime reconnect could not
+   * renew it): end any hosted room and show "Your session expired" with
+   * Back to StarHermit (relaunch) / Keep playing offline. Idempotent — the SDK's
+   * auth event and the rooms client's onAuthLost can both arrive.
+   */
+  showSessionExpired() {
+    const wasHosted = !!this.net;
+    if (wasHosted) {
+      this.hostedSession = false;
+      if (this.session) { this.session.pause(); this.session = null; }
+      this.net.leave();
+      this.net = null;
+    }
+    if (this.phase === 'expired') return;
+    if (!wasHosted && !['boot', 'title', 'mode-select'].includes(this.phase)) {
+      // A solo session keeps running locally; tell the player without interrupting.
+      this.ui.toast(shStrings().expiredTitle);
+      return;
+    }
+    this.phase = 'expired';
+    this.ui.showHud(false);
+    this.teardownRenderer();
+    this.ui.showScreen(this.ui.sessionExpiredScreen());
   }
 
   showModeSelect() {
@@ -435,6 +462,7 @@ class App {
         if (this.session && this.net && this.session === this.net.sim) this.onState(state, events);
       },
       onAuthorityReject: (reason) => this.onReject(reason),
+      onAuthLost: () => this.showSessionExpired(),
     });
   }
 

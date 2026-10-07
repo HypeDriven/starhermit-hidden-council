@@ -451,9 +451,13 @@ eight keyboard actions (`control.pause=Escape`, `undo=KeyU`, `hint=KeyH`, `camer
 **SDK.** `starhermit-sdk.js` loads before `bundle.js`; `new Platform()` (first thing the App
 does) calls `StarHermit.init()`, which reads the launch token from `#game_token=` (or the
 `#access_token=` sign-in return), strips it, takes the slug from `game_scope` and renews the
-token before expiry. Hosted mode is "the SDK is signed in". If renewal is refused the title
-re-renders without the account UI, a toast says the player is signed out, and play continues
-locally.
+token before expiry. Hosted mode is "the SDK is signed in". If renewal is refused because the
+token expired, a **Your session expired** dialog explains that progress keeps saving on this
+device and offers **Back to StarHermit** (`StarHermit.relaunch()` from the click — launcher, or
+sign-in for sign-in launches; a toast says so if the navigation is refused) and **Keep playing
+offline** (title without the account UI). Any hosted room ends first. During a solo session the
+game is not interrupted: a toast says the session expired. Other sign-outs re-render the title
+without the account UI with a "signed out" toast; play continues locally.
 
 **Used**
 * *Sign-in* — on `<id>.starhermit.com` without a token the title shows **Sign in with
@@ -481,7 +485,12 @@ locally.
 * *Realtime rooms* — hosted play uses StarHermit realtime rooms (`src/net.js`): REST lobby
   (`POST /api/v1/realtime/rooms`, `/open`, `/quick-join`, `/result`, `/leave`, `/mine` for
   reconnect) through `Platform.api()` (Bearer with the SDK's current token) and
-  `ws(s)://<host>/ws/v1/realtime?roomId=&access_token=`. The platform prefixes binary frames
+  `ws(s)://<host>/ws/v1/realtime?roomId=&access_token=`. A dropped socket reconnects with
+  backoff (500 ms doubling to 8 s, five attempts, then "connection lost"); every attempt first
+  renews the launch token (`StarHermit.renewForReconnect()`), because an expired token is
+  refused before the upgrade and looks like a plain drop. 'renewed' → `/mine`, then the URL is
+  rebuilt with the current token; 'retry' → back off without reopening; 'relaunch' → stop for
+  good and show the session-expired dialog. The platform prefixes binary frames
   with a 16-byte sender id (stripped); the creating tab runs the authoritative `SoloSession`
   and broadcasts snapshots; roster pushes drive the lobby and host-departure detection.
 * *Server script* — the client no longer calls `server.js`'s `/api/v1/scores`,
@@ -489,7 +498,7 @@ locally.
   shown only when signed in (StarHermit realtime rooms); standalone results, bests and
   achievements stay local. `server.js` remains a dev/static server exercised by `tests/run.js`.
 
-Account strings (sign-in, invite, toasts) are localized in all nine locales in
+Account strings (sign-in, invite, toasts, session-expired dialog) are localized in all nine locales in
 `src/i18n-gfx.js` (`shStrings`).
 
 **Not used**: `server.js` is not a platform game script, so platform game sessions
