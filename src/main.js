@@ -13,7 +13,7 @@ import {
 import { Platform } from './platform.js';
 import { RoomsClient } from './net.js';
 import { legalActions, STATION_ROOMS } from './rules.js';
-import { shStrings } from './i18n-gfx.js';
+import { shStrings, fmt } from './i18n-gfx.js';
 import { THEMES, dailyStage, practiceStage, challengeStage, JOURNEY } from './content.js';
 
 const DEFAULT_BINDINGS = {
@@ -378,18 +378,24 @@ class App {
       const fresh = this.session.recordCompletion(this.save);
       this.persistSave();
       if (this.platform.hosted) {
-        // On-platform there is nothing to submit: clients can never post
-        // scores. Personal bests live in the cloud-mirrored save; the global
-        // board is read-only and rendered once it resolves.
+        // On-platform: Journey, Daily and Challenge rounds post their total
+        // through the score script (high-score board); Tutorial and Practice
+        // post nothing. The global board renders once it resolves.
         this.phase = 'results';
         this.audio.event(won ? 'win' : 'lose', 9);
         if (fresh && fresh.length) setTimeout(() => this.audio.event('achievement', 11), 700);
-        this.ui.showScreen(this.ui.resultsScreen(result, this.stage, fresh, { leaderboard: 'loading' }));
-        this.platform.fetchPlatformLeaderboard().then((lb) => {
-          if (this.phase !== 'results') return;
+        const T = shStrings();
+        const ranked = /^(journey|daily|challenge)-/.test(this.stage.id || '');
+        const session = this.session;
+        this.ui.showScreen(this.ui.resultsScreen(result, this.stage, fresh,
+          { leaderboard: 'loading', lbLine: ranked ? T.lbPosting : null }));
+        const posted = ranked ? this.platform.submitScore(result.score.total) : Promise.resolve(null);
+        posted.then((r) => this.platform.fetchPlatformLeaderboard().then((lb) => {
+          if (this.phase !== 'results' || this.session !== session) return;
           const meta = lb && lb.entries && lb.entries.length ? { leaderboard: lb } : { leaderboard: null };
+          if (r) meta.lbLine = !r.posted ? T.lbNotPosted : r.rank ? fmt(T.lbRank, { rank: r.rank }) : T.lbPosted;
           this.ui.showScreen(this.ui.resultsScreen(result, this.stage, [], meta));
-        });
+        }));
         return;
       }
       // Standalone: results, bests and achievements stay on this device.

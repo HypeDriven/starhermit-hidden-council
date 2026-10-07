@@ -110,7 +110,23 @@ export class Platform {
     return this.nickname;
   }
 
-  /** Read-only platform leaderboard (clients can never submit scores). */
+  /**
+   * Post a finished round's total to the platform leaderboard through the
+   * game's score script (StarHermit.submitScores). Resolves { posted, rank }:
+   * rank on the high-score board, or null.
+   */
+  async submitScore(total) {
+    if (!this.hosted || typeof this.sh.submitScores !== 'function') return { posted: false, rank: null };
+    const keys = await this.sh.submitScores({ 'high-score': total });
+    if (!keys.includes('high-score')) return { posted: false, rank: null };
+    try {
+      const r = await this.sh.leaderboard('high-score', { pageSize: 100 });
+      const me = ((r && r.items) || []).find((i) => String(i.userId) === this.sub);
+      return { posted: true, rank: me ? me.rank : null };
+    } catch (e) { return { posted: true, rank: null }; }
+  }
+
+  /** Platform leaderboard read (the first board: high-score). */
   async fetchPlatformLeaderboard({ page = 1, pageSize = 10, scope } = {}) {
     if (!this.hosted) return null;
     try {

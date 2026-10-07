@@ -39,6 +39,7 @@ station's tasks, and work out which of you is winding the machine backwards.
 | `src/platform.js` | StarHermit adapter over `window.StarHermit`: sign-in, nickname/avatar, cloud-save mirror, settings KV, key bindings, invite link, read-only leaderboard, authenticated passthrough for rooms. No-ops offline. |
 | `src/net.js` | `RoomsClient`: StarHermit realtime rooms (REST lobby + `/ws/v1/realtime` binary transport), host-routed authority reusing `SoloSession`. |
 | `src/util.js` | Seeded RNG (mulberry32), FNV-1a string hash, formatting helpers. |
+| `score-script.js` | StarHermit platform script (`server=` in `starhermit.txt`): range-checks a finished round's total and posts it to the `high-score` leaderboard (canonical copy in the games repo's `tools/score-script.js`). |
 | `server.js` | Zero-dependency local-dev server: static files, `/api/v1/time`, plus legacy score/leaderboard/achievement routes and WebSocket rooms no longer used by the client. |
 | `tests/run.js` | 47 unit/integration tests (`npm test`), including real server + raw WebSocket handshakes and mocked platform/rooms adapter tests. |
 | `tests/gfx.test.mjs` | `node --test` unit tests for `gfx.js` and the Graphics locale tables (run by `npm test` after `run.js`). |
@@ -442,7 +443,7 @@ listed as unimplemented intent in §16. All formatting already goes through help
 
 ## 12. StarHermit integration
 
-`starhermit.txt` declares `name`, `launch=index.html`, `owner`, `server=server.js`,
+`starhermit.txt` declares `name`, `launch=index.html`, `owner`, `server=score-script.js`,
 `version=1.1.0`, `cover=coverart.png` per the conventions at https://wiki.starhermit.com/, plus
 eight keyboard actions (`control.pause=Escape`, `undo=KeyU`, `hint=KeyH`, `camera=KeyC`,
 `wait=Space`, `commit=Enter+NumpadEnter`, `prevTarget=ArrowLeft+ArrowUp`,
@@ -479,9 +480,13 @@ without the account UI with a "signed out" toast; play continues locally.
   (`syncServerTime`) and decides which UTC day the Daily Chime belongs to; failure degrades to
   the local clock. Standalone (no launch token) the game makes no own-server requests at all
   and uses the local clock.
-* *Leaderboards (read-only)* — the first platform board (`StarHermit.leaderboard()`, nicknames
-  via the profile route, own row marked) renders on the results screen when one exists;
-  otherwise only local records are shown. Clients never submit scores.
+* *Leaderboard* — signed in, every finished solo Journey, Daily Chime or Challenge round posts
+  its total through `StarHermit.submitScores` (`Platform.submitScore`: a practice session whose
+  `score-script.js` range-checks it and posts it to the `high-score` board, integer, higher is
+  better, 0–100,000); the results screen shows "Leaderboard rank: #N" (or posted / not posted)
+  and then the top ten of that board (`StarHermit.leaderboard()`, nicknames via the profile
+  route, own row marked). Tutorial, Practice and hosted-room rounds post nothing; standalone
+  posts nothing and shows only local records.
 * *Realtime rooms* — hosted play uses StarHermit realtime rooms (`src/net.js`): REST lobby
   (`POST /api/v1/realtime/rooms`, `/open`, `/quick-join`, `/result`, `/leave`, `/mine` for
   reconnect) through `Platform.api()` (Bearer with the SDK's current token) and
@@ -493,16 +498,16 @@ without the account UI with a "signed out" toast; play continues locally.
   good and show the session-expired dialog. The platform prefixes binary frames
   with a 16-byte sender id (stripped); the creating tab runs the authoritative `SoloSession`
   and broadcasts snapshots; roster pushes drive the lobby and host-departure detection.
-* *Server script* — the client no longer calls `server.js`'s `/api/v1/scores`,
+* *Platform script* — `score-script.js` only answers `{type:'result', scores}` on a practice
+  session. The client no longer calls `server.js`'s `/api/v1/scores`,
   `/api/v1/leaderboard`, `/api/v1/achievements` or its `/ws` room protocol. Hosted Play is
   shown only when signed in (StarHermit realtime rooms); standalone results, bests and
   achievements stay local. `server.js` remains a dev/static server exercised by `tests/run.js`.
 
-Account strings (sign-in, invite, toasts, session-expired dialog) are localized in all nine locales in
+Account strings (sign-in, invite, toasts, session-expired dialog, leaderboard line) are localized in all nine locales in
 `src/i18n-gfx.js` (`shStrings`).
 
-**Not used**: `server.js` is not a platform game script, so platform game sessions
-(`connect`, AI sessions), matchmaking queues, session invites/friends picker, session chat,
+**Not used**: platform game sessions beyond the score post, matchmaking queues, session invites/friends picker, session chat,
 replays and platform achievements have nothing to drive them; achievements stay local in the
 cloud-saved doc. Room invites to friends are not offered (quick-join only). Voice is out of
 scope.

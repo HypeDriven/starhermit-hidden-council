@@ -629,6 +629,12 @@ export class UI {
       for (const k of freshAchievements) ul.appendChild(this.el('li', '', '🏅 ' + k.replace(/_/g, ' ')));
       s.appendChild(ul);
     }
+    if (meta && meta.lbLine) {
+      const line = this.el('p', 'hc-muted', meta.lbLine);
+      line.id = 'results-lb';
+      line.setAttribute('role', 'status');
+      s.appendChild(line);
+    }
     if (meta && meta.leaderboard === 'loading') {
       s.appendChild(this.el('p', 'hc-muted', 'Loading the global board…'));
     } else if (meta && meta.leaderboard && !meta.leaderboard.leaderboardId) {
