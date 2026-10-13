@@ -820,8 +820,8 @@ export class StationRenderer {
     const key = this.postKey_();
     if (key !== this.postKey) { this.postKey = key; this.buildPost(); }
     if (this.composer) {
-      try { this.composer.render(dt); } catch (e) { this.postFailed = true; this.composer.dispose(); this.composer = null; this.renderer.render(this.scene, this.camera); }
-    } else this.renderer.render(this.scene, this.camera);
+      try { (globalThis.GameOptions ? globalThis.GameOptions.draw(this.composer.renderer, () => this.composer.render(dt)) : this.composer.render(dt)); } catch (e) { this.postFailed = true; this.composer.dispose(); this.composer = null; (globalThis.GameOptions ? globalThis.GameOptions.draw(this.renderer, () => this.renderer.render(this.scene, this.camera)) : this.renderer.render(this.scene, this.camera)); }
+    } else (globalThis.GameOptions ? globalThis.GameOptions.draw(this.renderer, () => this.renderer.render(this.scene, this.camera)) : this.renderer.render(this.scene, this.camera));
   }
 
   dispose() {
