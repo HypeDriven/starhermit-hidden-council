@@ -8,6 +8,8 @@
 // go through api(), an authenticated passthrough on the SDK's current token.
 // Without a token every method is a no-op and nothing touches the network.
 
+import { T } from './i18n.js';
+
 export class Platform {
   /** sdk: a StarHermit instance (tests pass one built with SDK.create()). */
   constructor(sdk) {
@@ -52,13 +54,14 @@ export class Platform {
   /** Title-screen identity line; '' offline. */
   accountLine() {
     if (!this.hosted) return '';
-    return `Playing as ${this.displayName ?? '…'} · ${this.syncLine()}`;
+    return T('Playing as {name} · {sync}', { name: this.displayName ?? '…', sync: this.syncLine() });
   }
 
-  /** Small sync badge text for the profile slot. */
+  /** Small sync badge text for the profile slot (current game language). */
   syncLine() {
-    const sync = { saving: 'saving…', synced: 'synced', offline: 'offline' }[this.syncStatus] ?? 'offline';
-    return `cloud save ${sync}`;
+    if (this.syncStatus === 'saving') return T('cloud save saving…');
+    if (this.syncStatus === 'synced') return T('cloud save synced');
+    return T('cloud save offline');
   }
 
   _setSync(status) {
@@ -84,7 +87,8 @@ export class Platform {
   /**
    * Call before reopening a realtime socket: resolves 'renewed' (rebuild the
    * URL from the current token), 'retry' (renewal failed transiently — back
-   * off, do not reopen the old URL) or 'relaunch' (token dead; signed out).
+   * off, do not reopen the old URL), 'terms-required' (the player must accept
+   * updated StarHermit terms first) or 'relaunch' (token dead; signed out).
    */
   renewForReconnect() {
     return this.sh && this.sh.renewForReconnect ? this.sh.renewForReconnect() : Promise.resolve('relaunch');
@@ -161,6 +165,19 @@ export class Platform {
     if (!doc || doc.v !== 1 || typeof doc.sum !== 'number' || !doc.data) return null;
     this._setSync('synced');
     return doc;
+  }
+
+  /**
+   * Another device saved since our last load: the SDK refused our conditional
+   * write (saveconflict). Reload the cloud envelope and hand it to fn to merge.
+   */
+  onConflict(fn) {
+    if (!this.sh) return;
+    this.sh.on('saveconflict', () => {
+      this.sh.loadJSON().then((doc) => {
+        fn(doc && doc.v === 1 && doc.data ? doc : null);
+      });
+    });
   }
 
   /** Mirror the local save doc to the cloud slot (debounced ~2 s, flushed on pagehide). */

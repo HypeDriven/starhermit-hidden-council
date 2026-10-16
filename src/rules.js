@@ -79,7 +79,7 @@ export function shortestPath(from, to) {
 
 const PLAYER_NAMES = ['Alder', 'Blythe', 'Corin', 'Dessa', 'Emmet', 'Farra', 'Gosse', 'Hilde', 'Ivo', 'Juniper', 'Kett', 'Lumen'];
 
-const TASK_LABELS = [
+export const TASK_LABELS = [
   'Wind the mainspring', 'Polish the starlens', 'Balance the escapement', 'Refill the oil globes',
   'Sort chronicle plates', 'Tune the whistle pipes', 'Feed the windup finches', 'Bleed the steam valves',
   'Align the pendulum', 'Patch the bellows', 'Chart the brass tides', 'Rewind the dumbwaiter',

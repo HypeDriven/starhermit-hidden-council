@@ -422,7 +422,7 @@ async function main() {
       const r = (st, b) => new Response(b, { status: st });
       if (url.includes('/cloud-saves/')) {
         const key = decodeURIComponent(url.split('/cloud-saves/')[1]);
-        if (method === 'PUT') { saves[key] = Buffer.from(body.dataBase64, 'base64'); return r(200, '{}'); }
+        if (method === 'PUT') { saves[key] = Buffer.from(body.dataBase64, 'base64'); return r(200, JSON.stringify({ etag: '"v' + calls.length + '"' })); }
         return saves[key] ? r(200, saves[key]) : r(404, '');
       }
       if (url.endsWith('/users/u1/profile')) return r(200, JSON.stringify({ username: 'ada_lovelace', nickname: 'Ada' }));
@@ -478,6 +478,32 @@ async function main() {
     sdk.signOut();
   });
 
+  await test('platform: a refused (412) cloud save reloads the other device\'s envelope for the merge', async () => {
+    const be = makeBackend();
+    let refuse = false;
+    const fetch = async (url, init = {}) => {
+      if (refuse && (init.method || 'GET') === 'PUT' && url.includes('/cloud-saves/')) {
+        refuse = false;
+        return new Response(JSON.stringify({ error: 'conflict' }), { status: 412 });
+      }
+      return be.fetch(url, init);
+    };
+    const { p, sdk } = makePlatform(launch, { fetch });
+    const remote = { v: 1, data: { sessions: 9 }, sum: 7 };
+    p.syncSave(remote);                 // "another device" wrote this
+    await p.flush();
+    await p.cloudLoad();
+    const got = [];
+    p.onConflict((doc) => got.push(doc));
+    refuse = true;
+    p.syncSave({ v: 1, data: { sessions: 2 }, sum: 1 });
+    await p.flush();
+    await new Promise((r) => setTimeout(r, 30));
+    assert.deepStrictEqual(got, [remote]);
+    assert.strictEqual(sdk.saveConflicted(), false);
+    sdk.signOut();
+  });
+
   await test('platform: settings KV patch + bindings + invite link', async () => {
     const be = makeBackend();
     const { p, sdk } = makePlatform(launch, be);
@@ -511,7 +537,7 @@ async function main() {
   });
 
   await test('platform: hosted domain without token offers sign-in', () => {
-    const { p } = makePlatform('', null, 'gid-1.starhermit.com');
+    const { p } = makePlatform('', null, '0b9d6f2e-3c4a-4e5b-9a7c-1d2e3f405162.starhermit.com');
     assert.strictEqual(p.hosted, false);
     assert.strictEqual(p.canSignIn(), true);
   });
@@ -577,7 +603,7 @@ async function main() {
   await test('rooms: quick-join 404 is honest (no room, captioned)', async () => {
     await withFetch(async () => jsonRes({ error: 'none open' }, 404), async () => {
       const caps = [];
-      const net = new netMod.RoomsClient(makeNetPlatform(), { onCaption: (t) => caps.push(t) });
+      const net = new netMod.RoomsClient(makeNetPlatform(), { onCaption: (t) => caps.push(typeof t === 'function' ? t() : t) });   // captions are deferred messages
       const ok = await net.quickJoin();
       assert.strictEqual(ok, false);
       assert.strictEqual(net.room, null);
@@ -615,7 +641,7 @@ async function main() {
       const RealWs = globalThis.WebSocket;
       globalThis.WebSocket = function (url) { urls.push(url); log.push('ws'); const w = RealWs(url); setImmediate(() => w.onopen && w.onopen()); return w; };
       const caps = [];
-      const net = new netMod.RoomsClient(plat, { onMessage: () => {}, onCaption: (c) => caps.push(c) });
+      const net = new netMod.RoomsClient(plat, { onMessage: () => {}, onCaption: (c) => caps.push(typeof c === 'function' ? c() : c) });
       net.room = 'room-7'; net.isHost = false; net.connected = true;
       net._scheduleReconnect();
       await waitFor(() => caps.includes('Reconnected.'));
@@ -657,6 +683,57 @@ async function main() {
       assert.deepStrictEqual(log, ['renew:relaunch']);   // no further attempts
       assert.strictEqual(net.room, null);
       assert.strictEqual(net.sim, null);
+    })));
+  });
+
+  await test("rooms: renewal 'terms-required' stops reconnecting and raises onTermsRequired", async () => {
+    const { log, plat } = reconnectRig(['terms-required']);
+    await withFastTimers(() => withFetch(async (url) => { log.push('fetch:' + url); return jsonRes({}, 500); }, () => withWs(async () => {
+      let opened = 0, terms = 0, lost = 0;
+      globalThis.WebSocket = function () { opened++; return {}; };
+      const net = new netMod.RoomsClient(plat, { onMessage: () => {}, onCaption: () => {}, onAuthLost: () => { lost++; }, onTermsRequired: () => { terms++; } });
+      net.room = 'room-7'; net.connected = true;
+      net.sim = { stopAi: () => {} };
+      net._scheduleReconnect();
+      await waitFor(() => terms === 1);
+      await new Promise((r) => setTimeout(r, 20));
+      assert.strictEqual(opened, 0);
+      assert.strictEqual(lost, 0);
+      assert.deepStrictEqual(log, ['renew:terms-required']);   // no further attempts
+      assert.strictEqual(net.room, null);
+      assert.strictEqual(net.sim, null);
+    })));
+  });
+
+  await test('rooms: a room that is gone after renewal ends the loop with onUnavailable', async () => {
+    const { log, plat } = reconnectRig(['renewed']);
+    await withFastTimers(() => withFetch(async (url) => { log.push('fetch:' + url); return jsonRes({ error: 'not_found' }, 404); }, () => withWs(async () => {
+      let opened = 0, gone = null;
+      globalThis.WebSocket = function () { opened++; return {}; };
+      const msgs = [];
+      const net = new netMod.RoomsClient(plat, { onMessage: (m) => msgs.push(m), onCaption: () => {}, onUnavailable: (e) => { gone = e; } });
+      net.room = 'room-7'; net.connected = true;
+      net._scheduleReconnect();
+      await waitFor(() => gone !== null);
+      await new Promise((r) => setTimeout(r, 20));
+      assert.strictEqual(gone.status, 404);
+      assert.strictEqual(opened, 0);
+      assert.strictEqual(log.filter((l) => l.startsWith('renew:')).length, 1, 'no retries after the room is gone');
+      assert.strictEqual(net.room, null);
+      assert(!msgs.some((m) => m.type === 'error'));
+    })));
+  });
+
+  await test('rooms: rooms/mine answering terms_acceptance_required raises onTermsRequired', async () => {
+    const { plat } = reconnectRig(['renewed']);
+    await withFastTimers(() => withFetch(async () => jsonRes({ error: 'terms_acceptance_required' }, 403), () => withWs(async () => {
+      let terms = 0;
+      globalThis.WebSocket = function () { return {}; };
+      const net = new netMod.RoomsClient(plat, { onMessage: () => {}, onCaption: () => {}, onTermsRequired: () => { terms++; } });
+      net.room = 'room-7'; net.connected = true;
+      net._scheduleReconnect();
+      await waitFor(() => terms === 1);
+      assert.strictEqual(net.room, null);
     })));
   });
 

@@ -25,15 +25,16 @@ station's tasks, and work out which of you is winding the machine backwards.
 
 | Path | Responsibility |
 |---|---|
-| `index.html` | Entry point: `#app`, `bundle.css`, deferred `starhermit-sdk.js` then `bundle.js`, `favicon.svg`, viewport-fit=cover. |
-| `starhermit-sdk.js` | Shared StarHermit client (`window.StarHermit`), an unmodified copy of `tools/starhermit-sdk.js`; shipped beside `bundle.js`, not bundled. |
+| `index.html` | Entry point: `#app`, `bundle.css`, deferred `starhermit-sdk.js`, `sh-language.js`, then `bundle.js`, `favicon.svg`, viewport-fit=cover. |
+| `starhermit-sdk.js`, `sh-language.js` | Shared StarHermit client (`window.StarHermit`) and language preference (`window.StarHermitLanguage`), unmodified copies of `tools/`; shipped beside `bundle.js`, not bundled. |
+| `src/i18n.js`, `src/strings.js` | Localization runtime (`T`, deferred `L` messages, in-place re-rendering, `hc-language` event, the Language setting) and the translation tables (English source strings as keys). |
 | `src/rules.js` | Pure deterministic rules engine — state, legal actions, resolution, AI, scoring, replay. No DOM, no THREE. |
 | `src/content.js` | Versioned content (`CONTENT_VERSION = 3`): 5 themes, 3 tutorials, 40 journey stages, daily/practice/challenge builders, offline stage validator. |
 | `src/session.js` | Session driver: solo loop, AI scheduling, undo stack, save/settings persistence, achievements, server-time sync, replay export. |
 | `src/ui.js` | Semantic DOM shell: HUD rails, screens, settings, live regions, results table. Issues commands only through the session. |
 | `src/render.js` | Three.js station: procedural rooms, pawns, gears, lamps, dust motes, camera framing, graphics settings (shadows, IBL, EffectComposer post chain, adaptive resolution, FPS readout), picking, context-loss recovery. |
 | `src/gfx.js` | Pure graphics quality model: presets, per-category overrides, GPU detection (`detectPreset`/`autoPreset`), `resolve()`, `presetTier()`, `choosePreset()`, `describe()`. |
-| `src/i18n-gfx.js` | Localized strings for the Graphics settings section and the StarHermit account UI (en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT). |
+| `src/i18n-gfx.js` | Localized strings for the Graphics settings section and the StarHermit account UI (en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT), in the game language. |
 | `src/audio.js` | WebAudio engine: 4 buses, authored Opus one-shots with synth fallback, ambience bed, generative music stem, captions. |
 | `src/main.js` | App state machine, input binding, platform/cloud wiring, hosted rooms (platform) + legacy dev-socket client, settings application. |
 | `src/platform.js` | StarHermit adapter over `window.StarHermit`: sign-in, nickname/avatar, cloud-save mirror, settings KV, key bindings, invite link, read-only leaderboard, authenticated passthrough for rooms. No-ops offline. |
@@ -41,8 +42,8 @@ station's tasks, and work out which of you is winding the machine backwards.
 | `src/util.js` | Seeded RNG (mulberry32), FNV-1a string hash, formatting helpers. |
 | `score-script.js` | StarHermit platform script (`server=` in `starhermit.txt`): range-checks a finished round's total and posts it to the `high-score` leaderboard (canonical copy in the games repo's `tools/score-script.js`). |
 | `server.js` | Zero-dependency local-dev server: static files, `/api/v1/time`, plus legacy score/leaderboard/achievement routes and WebSocket rooms no longer used by the client. |
-| `tests/run.js` | 47 unit/integration tests (`npm test`), including real server + raw WebSocket handshakes and mocked platform/rooms adapter tests. |
-| `tests/gfx.test.mjs` | `node --test` unit tests for `gfx.js` and the Graphics locale tables (run by `npm test` after `run.js`). |
+| `tests/run.js` | 56 unit/integration tests (`npm test`), including real server + raw WebSocket handshakes and mocked platform/rooms adapter tests. |
+| `tests/gfx.test.mjs`, `tests/i18n.test.mjs` | `node --test` unit tests for `gfx.js` and the Graphics locale tables, and for string coverage (every used key in all nine locales), live language switching and station-log rendering (run by `npm test` after `run.js`). |
 | `tests/e2e.mjs` | Playwright-core playthrough of the real UI at 1280×800 and 390×844. |
 | `sfx/` | 16 authored Opus one-shots + `manifest.txt` (canonical), `manifest.json` (regeneration), `manifest.md`. |
 | `assets/` | `title-keyart.webp`, `council-chamber.webp`. |
@@ -351,8 +352,8 @@ min(devicePixelRatio, preset cap 1/1.5/2/2) × render scale × adaptive scale. C
 live, persist in `hidden-council-settings.graphics` (the old `tier` value migrates to a preset),
 and set `data-gfx-preset` on `<body>`. The post chain is built only when an effect needs it, so
 Low renders directly; if the chain cannot be built the station renders without it and the panel
-says so. The Graphics strings are localized from `navigator.language`; the rest of the UI is
-English.
+says so. The Graphics rows live in their own box inside the section and redraw on a language
+change without disturbing the shared Sound / frame-rate / Language / Report sections beside them.
 
 **Visual assets the design calls for**: a title/menu key-art backdrop of the station interior; a
 results illustration of the council chamber after a verdict; platform cover art and icons. Both
@@ -404,16 +405,32 @@ carrier of information.
 
 ## 10. Localization
 
-The product requires en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR and it-IT. **Today the
-game ships one locale: en-US.** Every user-facing string is a literal in `src/ui.js`,
-`src/main.js` (captions, hints, tutorial steps) and `src/content.js` (stage, theme, task and
-character names); `index.html` declares `lang="en"`. There is no locale file, no string table and
-no language selector, and nothing in the code reads `navigator.language`. The intended design —
-a `src/strings.js` keyed table, locale chosen from the platform profile then `navigator.languages`
-with an `en-US` fallback, and layout allowances of +35% string length for de-DE and +25% for
-the romance locales (the rails already wrap and scroll, the action buttons already flow) — is
-listed as unimplemented intent in §16. All formatting already goes through helpers in
-`src/util.js`, which is where locale-aware number/time formatting will attach.
+Nine locales ship: **en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT**. Every
+player-facing string — HUD, actions, screens, setup sheet, lobby, results, help, captions,
+toasts, hints, rejection reasons, the station log, sound captions, and the content names (stages,
+themes, rooms, tasks, tutorial titles and steps, achievements) — is an English key in
+`src/strings.js` with es-419, de-DE, fr-FR, pt-BR and it-IT translations; en-GB, es-ES and fr-CA
+carry only their differences ("Colour-vision-safe palette", "sauvegarde infonuagique") and
+otherwise inherit en-US, es-419 and fr-FR. The Graphics section and the account strings keep their
+nine-locale tables in `src/i18n-gfx.js` and follow the same language. Station-log lines are
+generated by the rules engine in English (they travel in the shared state and the replay hash);
+the UI renders each known log shape in the current language (`ui.logText`). "Hidden Council",
+"StarHermit", player and automaton names are not translated; numbers stay plain digits.
+
+- **Language setting:** the pause screen and Settings (title → ⚙ Settings) contain the shared
+  `game-options.js` **Language → Game language** selector: **Automatic — <resolved language>** plus
+  the nine locales by native name, with a sync status line.
+- **Resolution** (`sh-language.js`): explicit game choice → for Automatic, the StarHermit account's
+  `preferredLanguage` (`GET /api/v1/me/language`, signed in only) → `navigator.languages` → en-US,
+  mapped to the nearest shipped locale (`es-MX → es-419`, `en-AU → en-GB`). The choice is stored per
+  player in `localStorage['hidden-council.language.<user|guest>']` and, signed in, in the
+  per-player settings key `ui.language` as `{ choice }`; the game never writes the platform
+  preference. `?lang=` forces a locale for the page load (QA links) and hides the selector.
+- **Live switching:** UI text is built from deferred messages, so a change re-renders the open
+  screen, HUD, lobby, captions, aria-labels and tooltips in place and sets `<html lang>`; the
+  session, its tick and any room socket are untouched.
+- **Layout:** rails wrap and scroll and the action buttons flow, so German and the romance locales
+  fit at 390 px wide.
 
 ---
 
@@ -465,10 +482,19 @@ without the account UI with a "signed out" toast; play continues locally.
   StarHermit** (`StarHermit.signIn()`); hidden when signed in and when running locally.
 * *Identity* — the profile nickname (`GET /api/v1/users/{sub}/profile`, never `/api/v1/me`,
   `"Player " + id` fallback) and avatar fill the title-screen profile slot with a cloud-sync
-  badge (synced/saving…/offline). The free-text local name remains the offline path.
+  badge (synced/saving…/offline, localized). The free-text local name remains the offline path.
 * *Cloud save* — the versioned+checksummed save doc mirrors to the slot `game:<slug>` via the
   SDK (remote wins on load through `mergeSaves`; ~2 s debounce, keepalive flush on
-  `pagehide`/hidden). localStorage stays the offline cache.
+  `pagehide`/hidden). localStorage stays the offline cache. Writes are conditional on the version
+  last read: when another device saved first (`saveconflict`), the game reloads the cloud envelope
+  and merges it with `mergeSaves` — best score per journey stage, larger session/win/streak counts,
+  union of achievements, lessons and actions used — keeping the session in progress, then saves
+  the merged doc.
+* *Reports* — Settings / pause → **Report a problem** (signed in, from `game-options.js`) files a
+  bug report through `StarHermit.reportBug` with a small non-personal `context.json`; uncaught
+  errors are filed as crash reports through `StarHermit.captureCrashes` (capped by the SDK).
+* *Language* — the per-player `ui.language` setting and the account's preferred language drive
+  the game language (§10).
 * *Settings KV* — every settings change (volumes, theme, graphics, accessibility, left-handed,
   hold-to-confirm, hints, camera) is mirrored with `patchSettings` (debounced 600 ms); on start
   the platform values are applied over the local ones.
@@ -495,7 +521,11 @@ without the account UI with a "signed out" toast; play continues locally.
   renews the launch token (`StarHermit.renewForReconnect()`), because an expired token is
   refused before the upgrade and looks like a plain drop. 'renewed' → `/mine`, then the URL is
   rebuilt with the current token; 'retry' → back off without reopening; 'relaunch' → stop for
-  good and show the session-expired dialog. The platform prefixes binary frames
+  good and show the session-expired dialog; 'terms-required' (or `/mine` answering
+  `terms_acceptance_required`) → stop for good and show the same dialog titled **Accept the
+  updated terms** with **Back to StarHermit**; `/mine` answering 404/409/410 (the room is gone)
+  → stop the loop and return to the title with a toast that the council room is no longer
+  available. The platform prefixes binary frames
   with a 16-byte sender id (stripped); the creating tab runs the authoritative `SoloSession`
   and broadcasts snapshots; roster pushes drive the lobby and host-departure detection.
 * *Platform script* — `score-script.js` only answers `{type:'result', scores}` on a practice
@@ -601,7 +631,7 @@ QA bar (`agents/qa.md`) as checkable statements:
 - [x] Automation reaches results by clicking only what a player sees.
 - [x] Platform features that fit are used: server script, platform time, leaderboards,
       achievements, hosted sessions.
-- [ ] Localization: only en-US ships today (see §10 and §16).
+- [x] Localization: nine locales with a live Language setting (§10).
 
 ---
 
@@ -638,7 +668,6 @@ All music and ambience are generated at runtime; the game ships no character ani
 
 ## 16. Known limitations
 
-* **One locale.** Only en-US strings exist; there is no string table or language selector (§10).
 * **No chat in hosted play.** Deduction is limited to the public log and votes, by design, but it
   makes hosted rooms sparser than a voice-chat deduction game.
 * **Suspicion is coarse.** `state.suspicion` counts only presence at a reported incident and is
@@ -655,9 +684,7 @@ All music and ambience are generated at runtime; the game ships no character ani
 
 ## Design intent not yet implemented
 
-1. Nine-locale support: `src/strings.js` string table, locale from platform profile →
-   `navigator.languages` → `en-US`, a Settings language selector, and locale-aware formatting in
-   `src/util.js`.
+1. Locale-aware number/time formatting in `src/util.js` (strings are localized; numbers are plain digits).
 2. A distinct `chime` event and clip for a player-called emergency meeting, separate from `meeting`.
 3. Server-side replay verification of submitted scores using the existing `replay()` chain.
 4. Hosted sessions feeding the same progression, achievements and leaderboard path as solo play.

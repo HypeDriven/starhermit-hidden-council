@@ -316,7 +316,7 @@ async function runPass(browser, port, vp) {
       // unreachable — see header comment). Toggle reduced motion + a slider.
       await page.getByText('Reduced motion').click();
       await page.waitForFunction(() => document.body.classList.contains('hc-reduced-motion'));
-      const music = page.getByLabel('Music');
+      const music = page.getByLabel('Music', { exact: true });   // the shared Sound section also has "Music volume"
       await music.fill('0.2');
       const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('hidden-council-settings')));
       if (!stored.reducedMotion || stored.music !== 0.2) throw new Error('settings not persisted');
@@ -437,6 +437,55 @@ async function runPass(browser, port, vp) {
       if (box.x < 0 || box.x + box.width > page.viewportSize().width + 1) throw new Error('toast cut off');
       if (!calls.some((c) => c.includes('/cloud-saves/game%3Agid-1'))) throw new Error('no cloud-save load: ' + calls.join(', '));
       if (!(await page.getByRole('button', { name: 'Hosted Play' }).count())) throw new Error('Hosted Play hidden while signed in');
+      await page.unroute(/\/api\/v1\//);
+    });
+
+    await step('Language: Automatic follows the account (fr-CA); Italian mid-session re-renders; ui.language; report', async () => {
+      const calls = await stubStarHermit(page, { preferredLanguage: 'fr-CA' });
+      await page.goto('about:blank');
+      await page.goto(`http://127.0.0.1:${port}/index.html#game_token=` + launchToken(), { waitUntil: 'load' });
+      await waitForPhase(page, 'title');
+      await page.waitForFunction(() => document.documentElement.lang === 'fr-CA');
+      await page.getByRole('button', { name: 'Carillon du jour' }).click();
+      await waitForPhase(page, 'active', 15000);
+      await page.getByRole('button', { name: '⏸ Pause' }).click();
+      await page.getByRole('heading', { name: 'En pause' }).waitFor();
+      const tickBefore = await page.evaluate(() => window.__hiddenCouncil.session.state.tick);
+      const choice = page.locator('[data-game-language="choice"]');
+      await choice.scrollIntoViewIfNeeded();
+      const auto = await choice.locator('option').first().textContent();
+      if (!/^Automatique — Français \(Canada\)$/.test(auto)) throw new Error('Automatic label not resolved: ' + auto);
+      await choice.selectOption('it-IT');
+      await page.waitForFunction(() => document.documentElement.lang === 'it-IT');
+      await page.waitForFunction(() => /Salvato/.test(document.querySelector('[data-game-language="status"]').textContent));
+      if (calls.settings['ui.language']?.choice !== 'it-IT') throw new Error('ui.language not saved: ' + JSON.stringify(calls.settings));
+      await page.getByRole('heading', { name: 'In pausa' }).waitFor();
+      if (!/Qualità/.test(await page.locator('#hc-gfx').textContent())) throw new Error('graphics box not re-rendered');
+      if (!/Compiti/.test(await page.locator('.hc-progress').textContent())) throw new Error('HUD not re-rendered');
+      if (await page.evaluate(() => window.__hiddenCouncil.session.state.tick) !== tickBefore) throw new Error('session moved while paused');
+      await page.locator('[data-game-report="title"]').scrollIntoViewIfNeeded();
+      await page.fill('[data-game-report="title"]', 'Test report');
+      await page.click('[data-game-report="send"]');
+      await page.waitForFunction(() => /Grazie/.test(document.querySelector('[data-game-report="status"]').textContent));
+      if (!calls.reports?.[0] || calls.reports[0].kind !== 'bug') throw new Error('report not posted');
+      await page.screenshot({ path: SHOT('language', vp) });
+      if (vp === 'mobile') {
+        await choice.selectOption('de-DE');
+        await page.waitForFunction(() => document.documentElement.lang === 'de-DE');
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        if (overflow > 0) throw new Error('German pause screen overflows by ' + overflow + 'px');
+        await page.screenshot({ path: SHOT('language-de', vp) });
+      }
+      await choice.selectOption('auto');
+      await page.waitForFunction(() => document.documentElement.lang === 'fr-CA');
+      // Back to English for the remaining steps, then leave to the signed-in title.
+      await choice.selectOption('en-US');
+      await page.waitForFunction(() => document.documentElement.lang === 'en-US');
+      await page.getByRole('button', { name: '▶ Resume' }).click();
+      await waitForPhase(page, 'active');
+      await page.getByRole('button', { name: '⏸ Pause' }).click();
+      await page.getByRole('button', { name: 'Leave Session' }).click();
+      await waitForPhase(page, 'title');
       await page.unroute(/\/api\/v1\//);
     });
 

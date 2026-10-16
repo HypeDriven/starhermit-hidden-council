@@ -14,6 +14,8 @@ import { Platform } from './platform.js';
 import { RoomsClient } from './net.js';
 import { legalActions, STATION_ROOMS } from './rules.js';
 import { shStrings, fmt } from './i18n-gfx.js';
+import { T, L } from './i18n.js';
+import { logText, roomName } from './ui.js';
 import { THEMES, dailyStage, practiceStage, challengeStage, JOURNEY } from './content.js';
 
 const DEFAULT_BINDINGS = {
@@ -29,7 +31,7 @@ class App {
     this.settings = loadSettings();
     this.ui = new UI(root, this);
     this.audio = new AudioEngine(this.settings);
-    this.audio.caption = (t) => this.ui.caption(t);
+    this.audio.caption = (t) => this.ui.caption(T(t)); // sound captions are translation keys
     this.renderer = null;
     this.session = null;
     this.stage = null;
@@ -43,7 +45,7 @@ class App {
     this.platform.loadBindings(DEFAULT_BINDINGS).then((b) => { this.bindings = b; });
     this.platform.onAuth = (signedIn, reason) => {
       if (!signedIn && reason === 'expired') { this.showSessionExpired(); return; }
-      if (!signedIn) this.ui.toast(shStrings().signedOut);
+      if (!signedIn) this.ui.toast(() => shStrings().signedOut);
       if (this.phase === 'title') this.showTitle();
     };
 
@@ -62,6 +64,14 @@ class App {
   /** Boot handshake for hosted mode: remote save wins on conflict. */
   initHosted() {
     this.platform.onSync = () => { if (this.phase === 'title') this.showTitle(); };
+    // Cloud-save conflict (another device saved first): merge both sides — best
+    // score per stage, larger session/win/streak counts, union of achievements,
+    // lessons and actions used — keep the running session, and save again.
+    this.platform.onConflict((remote) => {
+      if (remote) this.save = mergeSaves(remote.data, this.save);
+      this.persistSave();
+      if (this.phase === 'title') this.showTitle();
+    });
     return this.platform.initHosted().then((remoteDoc) => {
       if (remoteDoc) {
         this.save = mergeSaves(remoteDoc.data, loadSave());
@@ -120,11 +130,12 @@ class App {
 
   /**
    * The launch token died (renewal refused, or a realtime reconnect could not
-   * renew it): end any hosted room and show "Your session expired" with
-   * Back to StarHermit (relaunch) / Keep playing offline. Idempotent — the SDK's
-   * auth event and the rooms client's onAuthLost can both arrive.
+   * renew it) — or StarHermit needs the updated terms accepted (reason
+   * 'terms'): end any hosted room and show the expiry screen with Back to
+   * StarHermit (relaunch) / Keep playing offline. Idempotent — the SDK's auth
+   * event and the rooms client's onAuthLost / onTermsRequired can both arrive.
    */
-  showSessionExpired() {
+  showSessionExpired(reason) {
     const wasHosted = !!this.net;
     if (wasHosted) {
       this.hostedSession = false;
@@ -135,13 +146,22 @@ class App {
     if (this.phase === 'expired') return;
     if (!wasHosted && !['boot', 'title', 'mode-select'].includes(this.phase)) {
       // A solo session keeps running locally; tell the player without interrupting.
-      this.ui.toast(shStrings().expiredTitle);
+      this.ui.toast(reason === 'terms' ? L('Accept the updated terms') : () => shStrings().expiredTitle);
       return;
     }
     this.phase = 'expired';
     this.ui.showHud(false);
     this.teardownRenderer();
-    this.ui.showScreen(this.ui.sessionExpiredScreen());
+    this.ui.showScreen(this.ui.sessionExpiredScreen(reason));
+  }
+
+  /** The room is gone (closed, expired or ended elsewhere): stop and say so. */
+  showRoomUnavailable() {
+    if (this.net) { this.net = null; }
+    this.hostedSession = false;
+    if (this.session) { this.session.pause(); this.session = null; }
+    this.ui.toast(L('The council room is no longer available. Your progress on this device is safe.'));
+    this.showTitle();
   }
 
   showModeSelect() {
@@ -181,10 +201,10 @@ class App {
   }
 
   compatScreen() {
-    const s = this.ui.screen('Compatibility Notice');
-    s.appendChild(this.ui.el('p', '', 'WebGL is unavailable in this browser. The 3D station cannot be shown, but your progress is safe. You can still play using the action buttons.'));
-    s.appendChild(this.ui.button('Continue (2D controls)', 'hc-play', () => this.countdown()));
-    s.appendChild(this.ui.button('← Title', 'hc-subtle', () => this.showTitle()));
+    const s = this.ui.screen(L('Compatibility Notice'));
+    s.appendChild(this.ui.el('p', '', L('WebGL is unavailable in this browser. The 3D station cannot be shown, but your progress is safe. You can still play using the action buttons.')));
+    s.appendChild(this.ui.button(L('Continue (2D controls)'), 'hc-play', () => this.countdown()));
+    s.appendChild(this.ui.button(L('← Title'), 'hc-subtle', () => this.showTitle()));
     return s;
   }
 
@@ -207,7 +227,7 @@ class App {
   countdown() {
     this.phase = 'countdown';
     this.ui.showHud(true);
-    this.ui.announce('Session starting');
+    this.ui.announce(T('Session starting'));
     this.onState(this.session.state, []);
     let n = 3;
     const step = () => {
@@ -220,7 +240,7 @@ class App {
       } else {
         this.phase = 'active';
         this.audio.event('start', this.stage ? this.stage.seed : 1);
-        this.ui.announce('Go. ' + (this.stage.tutorialText || 'Complete the station tasks.'));
+        this.ui.announce(T('Go. {goal}', { goal: this.stage.tutorialText || T('Complete the station tasks.') }));
         this.session.scheduleAi();
       }
     };
@@ -230,7 +250,7 @@ class App {
   // Tutorial interstitial: present each step, require the player to act.
   startTutorial(tut) {
     const stage = {
-      id: tut.id, name: 'Tutorial: ' + tut.title, seed: tut.seed,
+      id: tut.id, name: 'Tutorial: ' + tut.title, seed: tut.seed,   // display title: ui.stageTitle
       config: { seed: tut.seed, playerCount: tut.playerCount, saboteurCount: tut.saboteurCount, taskCount: tut.taskCount },
       goals: { tasks: tut.taskCount }, par: 60, difficulty: 1, mechanics: [tut.rule],
       theme: THEMES[0].id, practice: true,
@@ -259,14 +279,14 @@ class App {
     this.phase = 'paused';
     if (this.session) this.session.pause();
     this.showPause();
-    this.ui.announce('Paused');
+    this.ui.announce(T('Paused'));
   }
 
   resumeGame() {
     this.phase = 'active';
     if (this.session) this.session.resume();
     this.ui.showScreen(null);
-    this.ui.announce('Resumed');
+    this.ui.announce(T('Resumed'));
   }
 
   leaveGame() {
@@ -295,7 +315,7 @@ class App {
       const map = { move: 'move', task: 'task', meeting: 'meeting', eject: 'eject', eliminate: 'eliminate', vote: 'vote', end: null, wait: null };
       const snd = map[e.kind];
       if (snd) this.audio.event(snd, state.seed + state.tick);
-      if (['meeting', 'eject', 'eliminate', 'end'].includes(e.kind)) this.ui.announce(e.text);
+      if (['meeting', 'eject', 'eliminate', 'end'].includes(e.kind)) this.ui.announce(logText(e));
     }
 
     if (this.tutorial) this.checkTutorialStep();
@@ -314,19 +334,19 @@ class App {
       if (tut.step >= steps.length) {
         this.save.tutorialDone[tut.def.id] = true;
         this.persistSave();
-        this.ui.announce('Lesson complete: ' + tut.def.title);
-        this.ui.caption('Lesson complete! Keep playing or leave.');
+        this.ui.announce(T('Lesson complete: {title}', { title: T(tut.def.title) }));
+        this.ui.caption(L('Lesson complete! Keep playing or leave.'));
       } else {
-        this.ui.announce(steps[tut.step].text);
+        this.ui.announce(T(steps[tut.step].text));
       }
     } else {
-      this.ui.announce(steps[tut.step].text);
+      this.ui.announce(T(steps[tut.step].text));
     }
   }
 
   onReject(reason) {
     this.audio.event('reject', 3);
-    const msg = 'Cannot do that: ' + reason.replace(/_/g, ' ');
+    const msg = L('Cannot do that: {reason}', { reason: () => rejectText(reason) });
     this.ui.caption(msg);
     this.ui.announce(msg);
   }
@@ -355,19 +375,19 @@ class App {
   hint() {
     if (!this.session) return;
     const acts = this.session.legal();
-    if (!acts.length) { this.ui.caption('No actions right now.'); return; }
+    if (!acts.length) { this.ui.caption(L('No actions right now.')); return; }
     const pri = acts.find((a) => a.type === 'report') || acts.find((a) => a.type === 'task') || acts.find((a) => a.type === 'vote') || acts[0];
     const text = {
-      move: 'Try moving toward a room with unfinished work.',
-      task: 'A task is ready here — complete it.',
-      report: 'Report the incident to convene the council.',
-      vote: 'Weigh the log and cast your vote.',
-      eliminate: 'An opportunity…',
-      call: 'You can ring the emergency chime.',
-      wait: 'Waiting lets the station tick forward.',
+      move: L('Try moving toward a room with unfinished work.'),
+      task: L('A task is ready here — complete it.'),
+      report: L('Report the incident to convene the council.'),
+      vote: L('Weigh the log and cast your vote.'),
+      eliminate: L('An opportunity…'),
+      call: L('You can ring the emergency chime.'),
+      wait: L('Waiting lets the station tick forward.'),
     }[pri.type];
-    this.ui.caption('Hint: ' + text);
-    this.ui.announce('Hint: ' + text);
+    this.ui.caption(L('Hint: {text}', { text }));
+    this.ui.announce(T('Hint: {text}', { text }));
     this.audio.event('hint', 2);
   }
 
@@ -384,16 +404,15 @@ class App {
         this.phase = 'results';
         this.audio.event(won ? 'win' : 'lose', 9);
         if (fresh && fresh.length) setTimeout(() => this.audio.event('achievement', 11), 700);
-        const T = shStrings();
         const ranked = /^(journey|daily|challenge)-/.test(this.stage.id || '');
         const session = this.session;
         this.ui.showScreen(this.ui.resultsScreen(result, this.stage, fresh,
-          { leaderboard: 'loading', lbLine: ranked ? T.lbPosting : null }));
+          { leaderboard: 'loading', lbLine: ranked ? () => shStrings().lbPosting : null }));
         const posted = ranked ? this.platform.submitScore(result.score.total) : Promise.resolve(null);
         posted.then((r) => this.platform.fetchPlatformLeaderboard().then((lb) => {
           if (this.phase !== 'results' || this.session !== session) return;
           const meta = lb && lb.entries && lb.entries.length ? { leaderboard: lb } : { leaderboard: null };
-          if (r) meta.lbLine = !r.posted ? T.lbNotPosted : r.rank ? fmt(T.lbRank, { rank: r.rank }) : T.lbPosted;
+          if (r) meta.lbLine = () => { const S = shStrings(); return !r.posted ? S.lbNotPosted : r.rank ? fmt(S.lbRank, { rank: r.rank }) : S.lbPosted; };
           this.ui.showScreen(this.ui.resultsScreen(result, this.stage, [], meta));
         }));
         return;
@@ -444,7 +463,7 @@ class App {
     }
     if (msg.type === 'state') this.applyHostedState(msg.state, []);
     if (msg.type === 'snapshot') {
-      this.applyHostedState(msg.state, msg.away && msg.away.length ? ['While you were away:'].concat(msg.away) : []);
+      this.applyHostedState(msg.state, msg.away && msg.away.length ? ['While you were away:'].concat(msg.away) : []);   // rendered via ui.logText
     }
     if (msg.type === 'rejected') this.onReject(msg.reason);
     if (msg.type === 'results') {
@@ -454,21 +473,26 @@ class App {
       if (this.phase !== 'results' && this.session) this.onEnd(this.session.result());
     }
     if (msg.type === 'host_left') {
-      this.ui.caption('The host left — the session has ended.');
+      this.ui.caption(L('The host left — the session has ended.'));
       this.leaveGame();
     }
-    if (msg.type === 'error') this.ui.caption('Server: ' + msg.error);
+    if (msg.type === 'error') this.ui.caption(L('Server: {error}', { error: () => serverErrorText(msg.error) }));
   }
 
   _makeNet() {
     return new RoomsClient(this.platform, {
       onMessage: (msg) => this.onHostedMessage(msg),
-      onCaption: (text) => this.ui.caption(text),
+      onCaption: (text) => this.ui.caption(text),   // net.js passes deferred messages
       onAuthorityState: (state, events) => {
         if (this.session && this.net && this.session === this.net.sim) this.onState(state, events);
       },
       onAuthorityReject: (reason) => this.onReject(reason),
       onAuthLost: () => this.showSessionExpired(),
+      // Reconnect needs the updated StarHermit terms accepted: same as auth loss,
+      // with the terms message on the Back to StarHermit screen.
+      onTermsRequired: () => this.showSessionExpired('terms'),
+      // The room is gone: the reconnect loop has ended; say so visibly.
+      onUnavailable: () => this.showRoomUnavailable(),
     });
   }
 
@@ -487,7 +511,7 @@ class App {
     if (!this.platform.hosted) return;
     this.net = this._makeNet();
     this.net.createRoom().catch(() => {
-      this.ui.caption('Could not create a room — try again.');
+      this.ui.caption(L('Could not create a room — try again.'));
       this.net = null;
     });
   }
@@ -496,7 +520,7 @@ class App {
     if (!this.platform.hosted) return;
     this.net = this._makeNet();
     this.net.quickJoin().then((ok) => { if (!ok) this.net = null; }).catch(() => {
-      this.ui.caption('Quick join failed — try again.');
+      this.ui.caption(L('Quick join failed — try again.'));
       this.net = null;
     });
   }
@@ -517,7 +541,7 @@ class App {
     if (this.net) {
       this.net.leave();
       this.net = null;
-      this.showScreen(this.ui.hostedScreen());
+      this.ui.showScreen(this.ui.hostedScreen());
     }
   }
 
@@ -599,7 +623,7 @@ class App {
           this.focusIndex = (this.focusIndex + (act === 'prevTarget' ? -1 : 1) + legal.length) % legal.length;
           const room = legal[this.focusIndex].room;
           if (this.renderer) { this.renderer.showLegalTargets([room]); this.renderer.placeCamera(room, false); }
-          this.ui.caption('Target: ' + room);
+          this.ui.caption(L('Target: {room}', { room: () => roomName(room) }));
           this.audio.event('ack', this.focusIndex);
           if (act === 'nextTarget' && e.shiftKey) this.humanAct({ type: 'move', room });
         }
@@ -652,6 +676,32 @@ class App {
       this.renderer.setGraphics(this.settings.graphics);
     }
   }
+}
+
+/** Player-facing text for a rules rejection reason (stable snake_case ids). */
+function rejectText(reason) {
+  const map = {
+    not_a_legal_target: L('not a legal target'), phase_locked: L('only votes count during a council'),
+    no_meeting: L('no council is in session'), already_voted: L('you already voted'),
+    bad_vote_target: L('that vote is not possible'), already_reported: L('that incident was already reported'),
+    bad_body: L('there is nothing to report here'), bad_room: L('that room does not exist'),
+    bad_target: L('that target is not possible'), bad_task: L('that task is not here'),
+    cooldown: L('still on cooldown'), no_meetings_left: L('no emergency chimes left'),
+    not_crew: L('only the crew can do that'), not_linked: L('that room is not connected'),
+    not_saboteur: L('only a saboteur can do that'), task_done: L('that task is already done'),
+    unknown_type: L('unknown action'), witnessed: L('someone would see it'), wrong_room: L('you are in the wrong room'),
+    game_over: L('the session is over'), player_dead: L('you are out of the session'),
+    not_active: L('the session is not running'), undo_not_allowed: L('undo is only available in practice'),
+    nothing_to_undo: L('nothing to undo'), duplicate_command: L('that action was already sent'),
+  };
+  return map[reason] ? map[reason]() : String(reason || '').replace(/_/g, ' ');
+}
+
+/** Room-channel error text. */
+function serverErrorText(error) {
+  if (error === 'connection lost') return T('connection lost');
+  if (error === 'room error') return T('room error');
+  return String(error || '');
 }
 
 const root = document.getElementById('app') || document.body.appendChild(document.createElement('div'));

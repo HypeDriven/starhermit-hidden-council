@@ -1,7 +1,10 @@
 'use strict';
-// Localized strings for the Graphics settings section (the rest of the game is
-// English-only). Locale comes from navigator.language: exact tag, then a
-// regional fallback for the language, then en-US.
+// Localized strings for the Graphics settings section and the StarHermit
+// account surface (the rest of the game is in ./strings.js). The locale is the
+// game language (./i18n.js, the Language setting): exact tag, then a regional
+// fallback for the language, then en-US.
+
+import { currentLang } from './i18n.js';
 
 const en = {
   graphics: 'Graphics', quality: 'Quality', auto: 'Auto (detected: {tier})',
@@ -82,7 +85,7 @@ const FALLBACK = { en: 'en-US', es: 'es-419', de: 'de-DE', fr: 'fr-FR', pt: 'pt-
 export const GFX_LOCALES = Object.keys(STRINGS);
 
 export function gfxLocale(lang) {
-  const l = String(lang || (typeof navigator !== 'undefined' ? navigator.language : '') || 'en-US');
+  const l = String(lang || currentLang() || 'en-US');
   const exact = GFX_LOCALES.find((k) => k.toLowerCase() === l.toLowerCase());
   if (exact) return exact;
   const base = l.split(/[-_]/)[0].toLowerCase();

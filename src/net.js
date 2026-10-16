@@ -16,6 +16,7 @@
 // state travels to every seat.
 
 import { SoloSession } from './session.js';
+import { L } from './i18n.js';
 
 const SENDER_PREFIX = 16;          // bytes, platform participant id prefix
 const MAX_BINARY_FRAME = 8192;     // 8 KB cap per binary frame
@@ -47,12 +48,17 @@ export class RoomsClient {
    * hooks: { onMessage(msg)   — game messages, same shapes as the legacy
    *                             server.js protocol (room/started/state/
    *                             snapshot/results/host_left/error),
-   *         onCaption(text)    — short status lines for the HUD caption,
+   *         onCaption(text)    — short status lines for the HUD caption
+   *                             (deferred messages: they follow the language),
    *         onAuthorityState(state, events)   — host only: the authority
    *                             advanced (drives the host UI directly),
    *         onAuthorityReject(reason)         — host only: authority reject,
    *         onAuthLost()       — the launch token could not be renewed; the
-   *                             client has stopped reconnecting for good }
+   *                             client has stopped reconnecting for good,
+   *         onTermsRequired()  — renewal needs the updated StarHermit terms
+   *                             accepted; reconnecting stopped (treat like auth loss),
+   *         onUnavailable(err) — the room is gone (closed/expired/ended); the
+   *                             reconnect loop has ended for good }
    */
   constructor(platform, hooks) {
     this.platform = platform;      // provides token, gameSlug, sub, displayName, profileFor
@@ -111,7 +117,7 @@ export class RoomsClient {
       body: JSON.stringify({ gameSlug: this.platform.gameSlug, seats: 1 }),
     });
     if (res.status === 404) {
-      this._caption('No open councils — create one and others can quick-join.');
+      this._caption(L('No open councils — create one and others can quick-join.'));
       return false;
     }
     if (!res.ok) throw new Error('rooms-unavailable');
@@ -180,7 +186,7 @@ export class RoomsClient {
       return;
     }
     const delay = Math.min(8000, 500 * 2 ** this._reconnects++);
-    this._caption('Reconnecting…');
+    this._caption(L('Reconnecting…'));
     const room = this.room;
     setTimeout(async () => {
       if (!this.room || this.room !== room) return;   // left meanwhile
@@ -188,28 +194,47 @@ export class RoomsClient {
       try { r = await this.platform.renewForReconnect(); } catch (e) { r = 'retry'; }
       if (!this.room) return;
       if (r === 'relaunch') { this._authLost(); return; }
+      if (r === 'terms-required') { this._stop(); this.hooks.onTermsRequired?.(); return; }
       if (r !== 'renewed') { this._scheduleReconnect(); return; }
       this._api('/api/v1/realtime/rooms/mine')
         .then(async (res) => {
-          if (!res.ok) throw new Error(String(res.status));
+          if (!res.ok) {
+            // A refusal is not a network blip: consent needed, or the room is gone.
+            const body = await res.json().catch(() => null);
+            const err = new Error(String(res.status));
+            err.status = res.status; err.body = body;
+            throw err;
+          }
           const m = await res.json();
           const rid = m?.roomId ?? m?.id ?? m?.room?.id ?? null;
-          if (!rid) throw new Error('not-in-room');
+          if (!rid) { const err = new Error('not-in-room'); err.status = 404; throw err; }
           this.room = rid;
           await this._connectWs();
-          this._caption('Reconnected.');
+          this._caption(L('Reconnected.'));
           if (this.isHost && this.sim) this._broadcastState();   // catch guests up
         })
-        .catch((e) => { if (this.room) this._scheduleReconnect(); });
+        .catch((e) => {
+          if (!this.room) return;
+          if (e && e.body && e.body.error === 'terms_acceptance_required') { this._stop(); this.hooks.onTermsRequired?.(); return; }
+          if (e && (e.status === 404 || e.status === 409 || e.status === 410)) { this._stop(); this.hooks.onUnavailable?.(e); return; }
+          if (e && e.status === 401) { this._authLost(); return; }
+          this._scheduleReconnect();
+        });
     }, delay);
+  }
+
+  /** End the reconnect loop for good (terms needed or room gone); no leave call. */
+  _stop() {
+    this._stopSim();
+    this.room = null;
+    try { this.ws?.close(); } catch (e) { /* already closed */ }
+    this.ws = null;
+    this.connected = false;
   }
 
   /** Renewal refused: stop reconnecting and tell the game to offer relaunch. */
   _authLost() {
-    this._stopSim();
-    this.room = null;
-    this.ws = null;
-    this.connected = false;
+    this._stop();
     this.hooks.onAuthLost?.();
   }
 
@@ -221,7 +246,7 @@ export class RoomsClient {
 
   _sendGameMsg(obj) {
     const bytes = encodeGameMsg(obj);
-    if (!bytes) { this._caption('Message too large for the room channel.'); return; }
+    if (!bytes) { this._caption(L('Message too large for the room channel.')); return; }
     if (this.ws?.readyState === 1) this.ws.send(bytes);
   }
 
@@ -255,7 +280,7 @@ export class RoomsClient {
   /** Host: add an automaton seat (the host's SoloSession drives its AI). */
   addAi() {
     if (!this.isHost || this.sim) return;
-    if (this.seats.length >= MAX_SEATS) { this._caption('The council is full.'); return; }
+    if (this.seats.length >= MAX_SEATS) { this._caption(L('The council is full.')); return; }
     const n = this.seats.filter((s) => s.ai).length + 1;
     this.seats.push({ id: 'ai:' + n, name: 'Automaton ' + n, ai: true, ready: true });
     this._broadcastRoom();
@@ -270,7 +295,7 @@ export class RoomsClient {
   start() {
     if (!this.isHost || this.sim) return;
     if (this.seats.length < MIN_SEATS_TO_START) {
-      this._caption('Need at least ' + MIN_SEATS_TO_START + ' seats to convene the council.');
+      this._caption(L('Need at least {n} seats to convene the council.', { n: MIN_SEATS_TO_START }));
       return;
     }
     const seed = (Math.random() * 2 ** 31) >>> 0;
