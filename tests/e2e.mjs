@@ -371,6 +371,7 @@ async function runPass(browser, port, vp) {
       await page.waitForTimeout(600); // a few Ultra frames through the full post chain
       await page.locator('#hc-gfx-preset').selectOption('high');
       await page.waitForFunction(() => document.body.dataset.gfxPreset === 'high' && /2048² shadows/.test(document.getElementById('hc-gfx-summary').textContent));
+      if (!/ · Level 0 · /.test(await page.textContent('#hc-gfx-summary'))) throw new Error('summary lacks the hardware level: ' + await page.textContent('#hc-gfx-summary'));
       const bloom = page.locator('#hc-gfx-bloom');
       if (!(await bloom.locator('option[value="preset"]').textContent()).includes('On')) throw new Error('bloom From preset label');
       await bloom.selectOption('off');

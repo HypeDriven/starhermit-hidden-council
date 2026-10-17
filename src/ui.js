@@ -601,14 +601,14 @@ export class UI {
         refreshSummary();
       };
       refreshSummary = () => {
-        const { gpu, detected } = info();
-        const r = resolve(st.graphics, detected);
+        const { gpu, level, detected } = info();
+        const r = resolve(st.graphics, detected, level);
         const live = app.renderer && app.renderer.graphicsInfo ? app.renderer.graphicsInfo() : null;
         const px = live ? live.pixels : [
           Math.round(window.innerWidth * Math.min(window.devicePixelRatio || 1, r.cap) * r.scale),
           Math.round(window.innerHeight * Math.min(window.devicePixelRatio || 1, r.cap) * r.scale),
         ];
-        summary.textContent = gpu + ' · ' + describe(live ? live.resolved : r, px, G.sum);
+        summary.textContent = [gpu, level != null ? fmt(G.level, { n: level }) : null, describe(live ? live.resolved : r, px, G.sum)].filter(Boolean).join(' · ');
         summary.dataset.preset = r.preset;
         note.hidden = !(live && live.postFailed);
       };

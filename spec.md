@@ -33,7 +33,8 @@ station's tasks, and work out which of you is winding the machine backwards.
 | `src/session.js` | Session driver: solo loop, AI scheduling, undo stack, save/settings persistence, achievements, server-time sync, replay export. |
 | `src/ui.js` | Semantic DOM shell: HUD rails, screens, settings, live regions, results table. Issues commands only through the session. |
 | `src/render.js` | Three.js station: procedural rooms, pawns, gears, lamps, dust motes, camera framing, graphics settings (shadows, IBL, EffectComposer post chain, adaptive resolution, FPS readout), picking, context-loss recovery. |
-| `src/gfx.js` | Pure graphics quality model: presets, per-category overrides, GPU detection (`detectPreset`/`autoPreset`), `resolve()`, `presetTier()`, `choosePreset()`, `describe()`. |
+| `src/gfx.js` | Pure graphics quality model: presets, per-category overrides, hardware-level detection (`detectLevel`/`presetForLevel`/`detectPreset`/`autoPreset`), per-preset `BUDGETS`/`budgetFor`, `resolve()`, `presetTier()`, `choosePreset()`, `describe()`. |
+| `gpu-level.js` | Shared StarHermit hardware-level module (`window.StarHermitGpu`, classic deferred script loaded before `bundle.js`), copied from the platform tools, never edited here. |
 | `src/i18n-gfx.js` | Localized strings for the Graphics settings section and the StarHermit account UI (en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT), in the game language. |
 | `src/audio.js` | WebAudio engine: 4 buses, authored Opus one-shots with synth fallback, ambience bed, generative music stem, captions. |
 | `src/main.js` | App state machine, input binding, platform/cloud wiring, hosted rooms (platform) + legacy dev-socket client, settings application. |
@@ -335,25 +336,57 @@ OS `prefers-reduced-motion` preference).
 shadow box is fitted to the deck slab and gear ring, a hemisphere fill and an accent rim light;
 a radial sky-glow background with distance fog in the theme's sky colour. Surfaces are PBR:
 riveted deck plates, turned-brass room dials and slatted corridor gratings are procedural canvas
-textures (colour + bump), pawns are lacquered `MeshPhysicalMaterial` with clearcoat, and each room
+textures (colour + bump), pawns are lacquered `MeshPhysicalMaterial` with clearcoat (High/Ultra; plain PBR on Balanced, Lambert on
+Low), and each room
 has a lamp post whose bulb is emissive enough to bloom. Optional effects: key-light PCF shadows
 (1024/2048/4096), image-based lighting from a PMREM `RoomEnvironment` ("reflections"), GTAO
 contact darkening, bloom limited to lamps and highlights (threshold 0.9), a colour grade (gentle
-S-curve, saturation, warm/cool split, slight black lift) with vignette, FXAA/SMAA/MSAA, up to 520
-additive brass-dust motes, and surface detail (plain colours and 8 gears vs textured surfaces and
-14 gears). Settings and Pause both contain a **Graphics** section: Quality (Auto, chosen from the
-unmasked GPU name — software renderers get Low, discrete GPUs and Apple M get High, others
-Balanced, capped at Balanced on touch/mobile devices; Low; Balanced; High; Ultra), a render
+S-curve, saturation, warm/cool split, slight black lift) with vignette, FXAA/SMAA/MSAA, additive brass-dust motes, and surface detail (plain colours and at most 8 gears vs
+textured surfaces and the preset's full gear count). Settings and Pause both contain a **Graphics** section: Quality (Auto, chosen from the
+StarHermit hardware level below; Low; Balanced; High; Ultra), a render
 scale slider (50–200% of the preset's), one select per effect defaulting to "From preset (…)"
 (choosing a preset clears overrides), adaptive resolution (averages 90 frames; above 26 ms it
 steps the scale down 0.1 to a floor of 0.6, below 14 ms back up 0.05), a frame-rate readout
-(bottom-left, never over controls), and a summary line "GPU · cost · W×H px". Pixel ratio is
+(bottom-left, never over controls), and a summary line "GPU · Level N · cost · W×H px" ("Level" localized). Pixel ratio is
 min(devicePixelRatio, preset cap 1/1.5/2/2) × render scale × adaptive scale. Changes apply
 live, persist in `hidden-council-settings.graphics` (the old `tier` value migrates to a preset),
 and set `data-gfx-preset` on `<body>`. The post chain is built only when an effect needs it, so
 Low renders directly; if the chain cannot be built the station renders without it and the panel
 says so. The Graphics rows live in their own box inside the section and redraw on a language
 change without disturbing the shared Sound / frame-rate / Language / Report sections beside them.
+
+**Hardware-level detection.** `gpu-level.js` (shared StarHermit copy, `window.StarHermitGpu`) rates the
+WebGL unmasked renderer plus device facts (`detectSystem()`) on the StarHermit hardware level 0–20 (0 =
+Galaxy S20 / Intel UHD or weaker and every software renderer, 20 = RTX 5090, each level ≈ 1.23×; laptop
+parts two levels below desktop; phones, tablets and ≤ 4 GB machines capped at 9). `gfx.js` maps it with
+`presetForLevel(level, { low: 0, balanced: 4, high: 10, ultra: 17 })`, so Auto picks Ultra on strong
+GPUs; adaptive resolution still steps down when slow. Headless SwiftShader is level 0 → Low. Phones and
+tablets pace Auto FPS at half the display refresh rate ("Auto (half refresh rate)") and start at 16
+simultaneous sounds (shared `game-options.js`).
+
+**Per-preset budgets** (`BUDGETS` / `budgetFor` in `src/gfx.js`; each preset holds 60 FPS on the weakest
+GPU Auto gives it — Low at level 0, Balanced 4, High 10, Ultra 17). The mote count is tuned at the floor
+level and scales up within the preset on faster GPUs (`StarHermitGpu.scaleBudget`, ≤ 4×). A preset change
+that alters an asset budget rebuilds the station and the pawns in place (positions, selection and
+opacity kept). Each gear is a single merged mesh (body, teeth and hub), one draw call instead of up to 16.
+
+| Budget | Low | Balanced | High | Ultra |
+|---|---|---|---|---|
+| Frosted (backdrop-filter) rails and overlays over the 3D view | no | no | yes | yes |
+| Station surfaces / pawn shells | Lambert / Lambert | Standard / Standard | Standard / clear-coat Physical | same as High |
+| Deck texture (pads ≤ 512², gratings ¼) | 128² | 256² | 512² | 1024² |
+| Decorative gears (plain detail shows at most 8) | 6 | 10 | 14 | 20 |
+| Round-geometry segments (gears, lamps, rims, pipes, pawns) | ×0.5 | ×0.75 | ×1 | ×1.5 |
+| Dust motes at the floor level (Dust motes low: a third) | 240 | 480 | 520 | 800 |
+| Bloom / GTAO resolution | ½ / ½ | ½ / ½ | ½ / ½ | full / full |
+
+**Benchmark** (`node tools/gfx-bench.mjs hidden-council`; hook `tests/gfx-bench.mjs` picks the preset in
+Settings, starts the Daily Chime and plays it through the visible HUD action buttons at a human cadence,
+pressing Retry at the results). Measured 2026-10-17 (AMD Radeon iGPU level 2 GPU time minus the same page
+with draws skipped, projected to the preset's floor level; RTX 5090 CPU time):
+
+- Desktop 1920×1080: PASS low (typical 0.28 / slow 1.88 ms at level 0, CPU p90 0.70 ms); PASS balanced (4.11 / 4.27 ms at level 4, CPU 1.30 ms); PASS high (2.53 / 2.96 ms at level 10, CPU 1.80 ms); PASS ultra (4.18 / 8.44 ms at level 17, CPU 1.90 ms).
+- Mobile 390×844 @3×: PASS low (0.00 / 0.00 ms at level 0, CPU 0.70 ms); PASS balanced (0.00 / 0.92 ms at level 4, CPU 1.20 ms).
 
 **Visual assets the design calls for**: a title/menu key-art backdrop of the station interior; a
 results illustration of the council chamber after a verdict; platform cover art and icons. Both
@@ -571,7 +604,8 @@ back to synthesis; missing images are removed from the DOM.
 
 **Performance budgets.** One `requestAnimationFrame` loop, paused when the document is hidden.
 Preset caps (Low/Balanced/High/Ultra): pixel ratio 1/1.5/2/2, render scale 1/1/1/1.25, motes
-0/160/520/520, gears 8/14/14/14, shadows off/1024/2048/4096; Low has no post chain. Geometry,
+0/160/520/800 at the floor level, gears 6/10/14/20, shadows off/1024/2048/4096, plus the asset budgets
+above; Low has no post chain. Geometry,
 materials, textures and the composer are disposed on teardown. The bundle is ~755 KB minified
 (Three.js dominates); `bundle.css` is 8 KB; the 16 Opus clips total ~350 KB and load lazily; the
 two WebP images total ~102 KB.
@@ -583,7 +617,7 @@ HUD actions chosen from the actually-rendered "Go:", "Do:", "⚠ Report", "Vote:
 buttons (using a BFS mirror of the room graph purely to pick which visible move button to press)
 → pause/settings/resume → results (asserting ≥6 score rows and a headline) → localStorage
 progression check → retry → Esc → Graphics section (Auto detects Low, Low → Ultra → High with
-`data-gfx-preset` and summary checks, a bloom override, the FPS readout, persistence, preset
+`data-gfx-preset` and summary checks including "Level 0", a bloom override, the FPS readout, persistence, preset
 clears overrides) → leave → reload → Settings shows the saved graphics, keyboard changes the
 preset, and the panel fits the viewport → StarHermit: standalone makes no platform call and shows
 no account buttons; a `#game_token=` launch against a stubbed API (`page.route`) shows the nickname,
@@ -613,7 +647,10 @@ checks — `/api/v1/time`, static `index.html`, structured 404s, score submit/le
 rejection of impossible/stale scores, idempotent achievements, a raw WebSocket lobby
 create/join/ready/start, and that a second human seat maps to its own player id.
 
-`tests/gfx.test.mjs` covers `detectPreset`/`autoPreset` on sample GPU strings, `resolve()` with
+`tests/gfx.test.mjs` covers hardware level → preset (SwiftShader/llvmpipe, AMD Radeon Graphics and Intel
+UHD → Low, Iris Xe → Balanced, GTX 1070 → High, RTX 4080/5090 → Ultra; phones such as Adreno 740 and
+`autoPreset(…, mobile)` capped at Balanced), the per-preset budget table (explicit, non-decreasing,
+floor-level tuned, scaling with the level, blur only on High/Ultra), `resolve()` with
 presets, overrides, invalid overrides and render-scale clamping, preset-clears-overrides,
 `describe()`, and that every required locale has every Graphics string.
 

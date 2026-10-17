@@ -4,7 +4,7 @@
 // active ↔ paused → resolving → results → progression.
 
 import { StationRenderer, ROOM_POS, LAYER_GAME, gpuName } from './render.js';
-import { autoPreset } from './gfx.js';
+import { detectLevel, presetForLevel } from './gfx.js';
 import { UI } from './ui.js';
 import { AudioEngine } from './audio.js';
 import {
@@ -97,7 +97,14 @@ class App {
         // One-time GPU probe for the Graphics panel's Auto preset.
         this.gpu = gpuName(gl);
         const mobile = (navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches) || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
-        this.gpuPreset = autoPreset(this.gpu, mobile);
+        // StarHermit hardware level (gpu-level.js): renderer string + device facts (cores, memory, screen).
+        let sys = { mobile, webgl2: !!(typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext) };
+        try {
+          const G = globalThis.StarHermitGpu;
+          if (G) { const d = G.detectSystem(); sys = { ...sys, mobile: mobile || d.mobile, touch: d.touch, screen: d.screen, cores: d.cores, memoryGb: d.memoryGb, astc: d.astc }; }
+        } catch (e) { /* defaults */ }
+        this.gpuLevel = detectLevel(this.gpu, sys);
+        this.gpuPreset = presetForLevel(this.gpuLevel);
       }
       return !!gl;
     } catch (e) { return false; }
@@ -106,7 +113,7 @@ class App {
   /** GPU name + Auto preset for the Graphics panel (probed once). */
   gpuInfo() {
     if (this.gpu == null) this.webglAvailable();
-    return { gpu: this.gpu || 'unknown GPU', detected: this.gpuPreset || 'balanced' };
+    return { gpu: this.gpu || 'unknown GPU', level: this.gpuLevel, detected: this.gpuPreset || 'balanced' };
   }
 
   persistSave() {
@@ -213,7 +220,7 @@ class App {
     this.renderer = new StationRenderer(this.ui.canvas, {
       seed: stage.seed, theme: this.settings.theme === 'auto' ? stage.theme : this.settings.theme,
       reducedMotion: this.settings.reducedMotion, cvd: this.settings.cvdPalette,
-      graphics: this.settings.graphics, gpu: this.gpuInfo().gpu, detected: this.gpuInfo().detected,
+      graphics: this.settings.graphics, gpu: this.gpuInfo().gpu, level: this.gpuInfo().level, detected: this.gpuInfo().detected,
     });
     if (this.renderer.failed) { this.renderer = null; return; }
     this.renderer.syncState(this.session.state);
