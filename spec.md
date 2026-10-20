@@ -290,7 +290,9 @@ rails collapse to 42 px tabs that slide open on hover/focus-within. Portrait ≤
 left rail to a 24 vh status panel below the top bar and the right rail to a bottom tray
 (max 38 vh) whose action buttons flow two-up in the thumb zone. Landscape ≤500 px tall narrows
 the rails to 180 px and shrinks screen padding. `env(safe-area-inset-*)` offsets every edge-
-anchored element, and `hc-left-handed` mirrors the two rails.
+anchored element, and `hc-left-handed` mirrors the two rails. The action buttons are kept per
+action and updated in place on every HUD refresh (only actions that appear or disappear add or
+remove a button), so a click pressed while the automata move still lands and keeps keyboard focus.
 Large screens: `ui-scale.js` sets `--ui-scale` on `<html>` (1 up to a 1600×1000 viewport, then the smaller of
 width/1600 and height/1000, capped at 2.5); the screen layer, HUD, toast and frame-rate badge are CSS-`zoom`ed by it
 with their vh/vw lengths divided by it, so menus and rails grow proportionally while the full-viewport 3D canvas is

@@ -139,34 +139,51 @@ export class UI {
       ? T('Council in session — cast your vote')
       : state.phase === 'over' ? T('Session over') : T('Your move');
 
-    // Actions: DOM equivalents of canvas targets.
-    this.actionsEl.innerHTML = '';
+    // Actions: DOM equivalents of canvas targets, kept per action and updated
+    // in place. The HUD refreshes after every AI step (~450 ms), and a click
+    // only fires when press and release land on the same element, so
+    // rebuilding the buttons mid-press lost the click (and keyboard focus).
     const acts = legal || [];
-    const addBtn = (label, fn, key) => {
-      const b = this.button(label, 'hc-action', fn);
-      if (key) b.setAttribute('aria-keyshortcuts', key);
-      this.actionsEl.appendChild(b);
-    };
+    const want = [];
+    const addBtn = (id, label, fn, key) => want.push({ id, label, fn, key });
     for (const a of acts) {
       if (a.type === 'move') {
         const room = a.room;
-        addBtn(T('Go: {room}', { room: roomName(room) }), () => this.app.humanAct({ type: 'move', room }));
+        addBtn('move:' + room, T('Go: {room}', { room: roomName(room) }), () => this.app.humanAct({ type: 'move', room }));
       } else if (a.type === 'task') {
-        addBtn(T('Do: {task}', { task: taskLabel(state, a.task) }), () => this.app.humanAct({ type: 'task', task: a.task }));
+        addBtn('task:' + a.task, T('Do: {task}', { task: taskLabel(state, a.task) }), () => this.app.humanAct({ type: 'task', task: a.task }));
       } else if (a.type === 'report') {
-        addBtn(T('⚠ Report incident'), () => this.app.humanAct({ type: 'report', body: a.body }));
+        addBtn('report:' + a.body, T('⚠ Report incident'), () => this.app.humanAct({ type: 'report', body: a.body }));
       } else if (a.type === 'eliminate') {
-        addBtn(T('Eliminate {name}', { name: playerName(state, a.target) }), () => this.app.humanAct({ type: 'eliminate', target: a.target }));
+        addBtn('eliminate:' + a.target, T('Eliminate {name}', { name: playerName(state, a.target) }), () => this.app.humanAct({ type: 'eliminate', target: a.target }));
       } else if (a.type === 'call') {
-        addBtn(T('Ring the chime'), () => this.app.humanAct({ type: 'call' }));
+        addBtn('call', T('Ring the chime'), () => this.app.humanAct({ type: 'call' }));
       } else if (a.type === 'vote') {
-        addBtn(a.choice === 'skip' ? T('Vote: skip') : T('Vote: {name}', { name: playerName(state, a.choice) }), () => this.app.humanAct({ type: 'vote', choice: a.choice }));
+        addBtn('vote:' + a.choice, a.choice === 'skip' ? T('Vote: skip') : T('Vote: {name}', { name: playerName(state, a.choice) }), () => this.app.humanAct({ type: 'vote', choice: a.choice }));
       }
     }
-    if (acts.some((a) => a.type === 'wait')) addBtn(T('Wait'), () => this.app.humanAct({ type: 'wait' }), this.app.keyLabel ? this.app.keyLabel('wait') : 'Space');
+    if (acts.some((a) => a.type === 'wait')) addBtn('wait', T('Wait'), () => this.app.humanAct({ type: 'wait' }), this.app.keyLabel ? this.app.keyLabel('wait') : 'Space');
     const keyOf = (a) => this.app.keyLabel ? this.app.keyLabel(a) : '';
-    if (this.app.session && this.app.session.practice) addBtn(T('↩ Undo ({key})', { key: keyOf('undo') }), () => this.app.undo(), keyOf('undo'));
-    addBtn(T('💡 Hint ({key})', { key: keyOf('hint') }), () => this.app.hint(), keyOf('hint'));
+    if (this.app.session && this.app.session.practice) addBtn('undo', T('↩ Undo ({key})', { key: keyOf('undo') }), () => this.app.undo(), keyOf('undo'));
+    addBtn('hint', T('💡 Hint ({key})', { key: keyOf('hint') }), () => this.app.hint(), keyOf('hint'));
+    const have = new Map();
+    for (const b of this.actionsEl.children) have.set(b.dataset.action, b);
+    let next = this.actionsEl.firstChild;
+    for (const w of want) {
+      let b = have.get(w.id);
+      if (b) {
+        have.delete(w.id);
+        if (b.textContent !== w.label) bindText(b, w.label);
+      } else {
+        b = this.button(w.label, 'hc-action', w.fn);
+        b.dataset.action = w.id;
+      }
+      if (w.key) b.setAttribute('aria-keyshortcuts', w.key);
+      else b.removeAttribute('aria-keyshortcuts');
+      if (b === next) next = b.nextSibling;
+      else this.actionsEl.insertBefore(b, next);
+    }
+    for (const b of have.values()) b.remove();
 
     this.logEl.innerHTML = '';
     for (const e of state.log.slice(-7)) {
