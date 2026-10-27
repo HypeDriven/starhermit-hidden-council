@@ -1,18 +1,19 @@
 {
   "name": "hidden-council",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "node tests/run.js && node --test tests/gfx.test.mjs tests/i18n.test.mjs",
-    "test:e2e": "node tests/e2e.mjs"
-  },
-  "keywords": [],
-  "author": "",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hidden Council — clockwork social deduction on the StarHermit engine (script game): deterministic rules engine, starhermit:scene station, starhermit:ui interface, server-refereed hosted councils.",
   "license": "PolyForm-Noncommercial-1.0.0",
-  "dependencies": {
-    "esbuild": "^0.28.2",
-    "three": "^0.185.1"
+  "scripts": {
+    "test": "npm run test:unit && npm run test:native",
+    "test:unit": "node --test tests/rules.test.mjs tests/save.test.mjs tests/server.test.mjs tests/hosted.test.mjs tests/jint.test.mjs tests/i18n.test.mjs",
+    "test:native": "node tests/native.mjs",
+    "test:browser": "node tools/browser-play.mjs .",
+    "server": "node tools/build-server.mjs",
+    "package": "node tools/package-web.mjs",
+    "css": "node tools/css.mjs",
+    "types": "starhermit types ."
   },
   "devDependencies": {
     "playwright-core": "^1.62.1"
