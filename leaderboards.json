@@ -1,0 +1,9 @@
+{
+  "high-score": {
+    "name": "High score",
+    "scoreType": "integer",
+    "sortDirection": "desc",
+    "minScore": 0,
+    "maxScore": 100000
+  }
+}

@@ -1,6 +1,7 @@
 'use strict';
-// Session module: solo/hosted game driver, persistence, achievements,
-// server-time sync. No DOM/THREE knowledge beyond callbacks.
+// Session module: the solo game driver, the save document (shape, checksum
+// envelope, merge), the game's own settings and achievements. No DOM, no
+// storage: the engine client (native/platform.ts) keeps the documents.
 
 import { createInitialState, applyCommand, legalActions, aiCommand, scoreBreakdown, playerWon, stateHash, serialize, deserialize, RULES_VERSION } from './rules.js';
 import { CONTENT_VERSION } from './content.js';
@@ -9,9 +10,6 @@ import { hashStr } from './util.js';
 // ---------------------------------------------------------------------------
 // Persistence: versioned + checksummed save document
 // ---------------------------------------------------------------------------
-
-const SAVE_KEY = 'hidden-council-save';
-const SETTINGS_KEY = 'hidden-council-settings';
 
 export const ACHIEVEMENTS = [
   { key: 'first_completion', name: 'First Winding', desc: 'Finish your first session.' },
@@ -34,19 +32,10 @@ export function wrapSave(data) {
   return { v: 1, data, sum: checksum(data) };
 }
 
-export function loadSave() {
-  try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return defaultSave();
-    const doc = JSON.parse(raw);
-    if (doc.v !== 1 || checksum(doc.data) !== doc.sum) return defaultSave();
-    return doc.data;
-  } catch (e) { return defaultSave(); }
-}
-
-function defaultSave() {
+/** A fresh save document; `name` is the profile name (a guest name by default). */
+export function defaultSave(name) {
   return {
-    profile: { name: 'Guest ' + Math.floor(Math.random() * 900 + 100) },
+    profile: { name: name || 'Guest' },
     journey: {}, // stageId -> {score, won}
     sessions: 0,
     wins: 0,
@@ -58,8 +47,20 @@ function defaultSave() {
   };
 }
 
-export function storeSave(data) {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(wrapSave(data))); } catch (e) { /* full/blocked */ }
+/** The save inside a stored envelope ({v: 1, data, sum}), or null when it is not one or its checksum is wrong. */
+export function unwrapSave(doc) {
+  if (!doc || typeof doc !== 'object' || doc.v !== 1 || !doc.data || typeof doc.data !== 'object') return null;
+  if (checksum(doc.data) !== doc.sum) return null;
+  return normalizeSave(doc.data);
+}
+
+/** Fills missing fields of a save document (older or partial copies). */
+export function normalizeSave(data) {
+  const out = defaultSave();
+  if (!data || typeof data !== 'object') return out;
+  for (const k of Object.keys(out)) if (data[k] != null && typeof data[k] === typeof out[k]) out[k] = data[k];
+  if (!Array.isArray(out.actionsUsed)) out.actionsUsed = [];
+  return out;
 }
 
 // Merge two snapshots: keep the one with strictly more progress; otherwise
@@ -81,29 +82,15 @@ export function mergeSaves(a, b) {
   return out;
 }
 
-export function loadSettings() {
-  const def = {
-    music: 0.6, effects: 0.8, ambience: 0.5, voice: 0.7,
-    graphics: {}, theme: 'brass-dawn',
-    largeText: false, highContrast: false, cvdPalette: false, reducedMotion: false,
-    leftHanded: false, holdToConfirm: false, hints: true, camera: 'default',
-  };
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return def;
-    const out = Object.assign(def, JSON.parse(raw));
-    // Migrate the old single "Graphics tier" select into the preset model.
-    if (out.tier && !(out.graphics && out.graphics.preset)) {
-      out.graphics = Object.assign({}, out.graphics, { preset: { low: 'low', medium: 'balanced', high: 'high' }[out.tier] || 'auto' });
-    }
-    delete out.tier;
-    if (!out.graphics || typeof out.graphics !== 'object') out.graphics = {};
-    return out;
-  } catch (e) { return def; }
-}
+/** The game's own options (the browser build's settings that the runtime's Options do not cover). */
+export const SETTING_DEFAULTS = { theme: 'brass-dawn', cvdPalette: false, leftHanded: false, holdToConfirm: false, hints: true };
 
-export function storeSettings(s) {
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) {}
+/** A setting value checked against its default's type (undefined when it does not fit). */
+export function checkSetting(key, value) {
+  if (!Object.prototype.hasOwnProperty.call(SETTING_DEFAULTS, key)) return undefined;
+  const def = SETTING_DEFAULTS[key];
+  if (key === 'theme') return typeof value === 'string' && (value === 'auto' || /^[a-z-]{1,32}$/.test(value)) ? value : undefined;
+  return typeof value === typeof def ? value : undefined;
 }
 
 // Idempotent achievement unlock; returns list of newly unlocked keys.
@@ -119,27 +106,13 @@ export function unlockAchievements(save, keys) {
 }
 
 // ---------------------------------------------------------------------------
-// Server time sync
+// Timers: the AI's think delay. The engine client drives them from its fixed
+// steps (setSessionTimers) so play is deterministic; node tests keep setTimeout.
 // ---------------------------------------------------------------------------
 
-// Only with a launch token: standalone play makes no own-server requests and
-// keeps the local clock.
-export async function syncServerTime(token) {
-  if (!token) return { offset: 0, rtt: 0, ok: false };
-  try {
-    const t0 = Date.now();
-    const headers = token ? { authorization: `Bearer ${token}` } : {};
-    const res = await fetch('/api/v1/time', { headers, cache: 'no-store' });
-    if (!res.ok) throw new Error(String(res.status));
-    const body = await res.json();
-    const t1 = Date.now();
-    const serverNow = typeof body.now === 'number' ? body.now : body.serverTime;
-    if (typeof serverNow === 'number') {
-      return { offset: serverNow - Math.round((t0 + t1) / 2), rtt: t1 - t0, ok: true };
-    }
-  } catch (e) { /* offline: local clock */ }
-  return { offset: 0, rtt: 0, ok: false };
-}
+let timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) };
+/** Replaces the timer functions every session uses: { set(fn, ms) → handle, clear(handle) }. */
+export function setSessionTimers(t) { timers = t; }
 
 // ---------------------------------------------------------------------------
 // Solo session driver
@@ -211,7 +184,7 @@ export class SoloSession {
     if (this.over || this.paused) return;
     this.stopAi();
     const delay = this.hooks.aiDelayMs != null ? this.hooks.aiDelayMs : 500;
-    this.aiTimer = setTimeout(() => this.stepAi(), delay);
+    this.aiTimer = timers.set(() => this.stepAi(), delay);
   }
 
   // One AI step. With instant=true, loops until the human can act again
@@ -274,7 +247,7 @@ export class SoloSession {
 
   pause() { this.paused = true; this.stopAi(); }
   resume() { this.paused = false; if (!this.over) this.scheduleAi(); }
-  stopAi() { if (this.aiTimer) { clearTimeout(this.aiTimer); this.aiTimer = null; } }
+  stopAi() { if (this.aiTimer) { timers.clear(this.aiTimer); this.aiTimer = null; } }
 
   result() {
     const score = scoreBreakdown(this.state, this.humanId);
