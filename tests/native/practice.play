@@ -1,0 +1,44 @@
+# Practice, difficulty 1: a hint (H), a wait (Space) and Undo from the action
+# drawer, the pause dialog's Help and back, Resume, then leaving by Pause.
+until 600 Hidden Council
+frames 30
+click =▶ Play
+until 120 Choose Your Session
+frames 10
+click =Practice
+until 120 Unranked. Restart and undo
+frames 10
+click =Difficulty 1
+until 300 Actions ▸
+frames 200
+key KeyH 1
+frames 5
+expect Hint:
+key Space 1
+frames 40
+click =Actions ▸
+until 120 Undo (
+frames 10
+save practice
+click ↩ Undo
+frames 20
+key Escape 1
+until 60 Leave Session
+frames 10
+save pause
+click =Help
+until 60 Find a silenced tinkerer
+frames 10
+click =← Back
+until 60 Leave Session
+frames 10
+click =▶ Resume
+frames 30
+click =🗺️ Map
+frames 60
+save overview
+key Escape 1
+until 60 Leave Session
+frames 10
+click =Leave Session
+until 300 Hidden Council

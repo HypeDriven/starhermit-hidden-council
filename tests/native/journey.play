@@ -1,0 +1,33 @@
+# Journey stage 2 ("Oil and Ink") to its results, planned by tools/gen-plays.mjs:
+# the player stays put and, in the one council, votes "skip" once the
+# automata have voted; the crew finish the tasks. Then Retry from the results,
+# and back to the title.
+until 600 Hidden Council
+frames 30
+click =Journey
+until 120 Oil and Ink
+frames 10
+save journey
+click =Oil and Ink — difficulty 1
+until 120 Expected length
+frames 10
+save setup
+click =Begin
+until 300 Actions ▸
+frames 10
+click =Actions ▸
+until 600 Council in session
+frames 300
+save council
+click =Vote: skip
+until 3000 The Station Turns Again
+frames 60
+save results
+click =↻ Retry
+until 300 Actions ▸
+frames 200
+key Escape 1
+until 60 Leave Session
+frames 10
+click =Leave Session
+until 300 Hidden Council

@@ -1,0 +1,53 @@
+# Tutorial "Getting Around": two moves by the keys (an arrow browses the
+# legal targets, Enter goes), the lesson completes, the crew finish the
+# station's tasks and the results open; then the "Work of the Crew" lesson's
+# task from the action drawer.
+until 600 Hidden Council
+frames 30
+click =▶ Play
+until 120 Choose Your Session
+frames 10
+click =Tutorial
+until 120 Tutorial Lessons
+frames 10
+save tutorials
+click =Getting Around
+until 300 Actions ▸
+frames 200
+click =☰ Log
+frames 10
+expect Rooms are joined by brass corridors
+save lesson
+key ArrowRight 1
+frames 5
+expect Target:
+key Enter 1
+frames 30
+expect Good. Move once more
+key ArrowRight 1
+frames 5
+key Enter 1
+frames 30
+expect Lesson complete
+until 3000 The Station Turns Again
+frames 30
+click =← Title
+until 300 Hidden Council
+frames 10
+click =▶ Play
+until 120 Choose Your Session
+frames 10
+click =Tutorial
+until 120 ✓ Getting Around
+frames 10
+click =Work of the Crew
+until 300 Actions ▸
+frames 200
+click =Actions ▸
+until 600 Do:
+frames 10
+save lesson-task
+click Do:
+frames 30
+expect Task complete
+until 3000 The Station Turns Again

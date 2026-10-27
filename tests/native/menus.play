@@ -1,0 +1,54 @@
+# The menus: Help from the title, Settings (a toggle, the theme), the
+# Challenges list (Beat the Clock launched and left), the Practice list,
+# the setup sheet of a Journey stage and back.
+until 600 Hidden Council
+frames 30
+click =Help
+until 120 How to Play
+frames 10
+save help
+click =← Back
+until 120 Hidden Council
+frames 10
+click =⚙ Settings
+until 120 StarHermit Options
+frames 10
+click =Hints
+frames 10
+save settings
+click =Hints
+frames 10
+click =← Back
+until 120 Hidden Council
+frames 10
+click =▶ Play
+until 120 Choose Your Session
+frames 10
+click =Challenge
+until 120 Beat the Clock
+frames 10
+save challenges
+click =Beat the Clock — 55 ticks
+until 300 Actions ▸
+frames 200
+click =☰ Log
+frames 20
+expect ticks left
+save challenge
+key Escape 1
+until 60 Leave Session
+frames 10
+click =Leave Session
+until 300 Hidden Council
+frames 10
+click =▶ Play
+until 120 Choose Your Session
+frames 10
+click =Journey
+until 120 First Windings
+frames 10
+click =First Windings — difficulty 1
+until 120 Expected length
+frames 10
+click =← Back
+until 120 Choose Your Session
