@@ -188,7 +188,7 @@ function build(): void {
   }
   moteGeo = new BufferGeometry();
   moteGeo.setAttribute("position", new BufferAttribute(pos, 3));
-  moteMat = new PointsMaterial({ color: theme.accent, size: 0.09, map: moteTexture() ?? undefined, transparent: true, opacity: 0.75, depthWrite: false, blending: AdditiveBlending, sizeAttenuation: true });
+  moteMat = new PointsMaterial({ color: own(theme.accent), size: 0.09, map: moteTexture() ?? undefined, transparent: true, opacity: 0.75, depthWrite: false, blending: AdditiveBlending, sizeAttenuation: true });
   motes = new Points(moteGeo, moteMat);
   motes.frustumCulled = false;
   scene.add(motes);
@@ -229,7 +229,10 @@ function applyTheme(): void {
 }
 function applyBackground(): void { scene.background = active ? (bgTex ?? new Color(theme.sky)) : new Color(MENU_BG); }
 
+/** Copies Color objects so materials never share one (three copies; the engine keeps the object below minor 24). */
+function own(v: Any): Any { return v && typeof v.clone === "function" ? v.clone() : v; }
 function surfaceMat(p: Any): Any {
+  p = { ...p, color: own(p.color), emissive: own(p.emissive) };
   if (look?.budget.material === "lambert") {
     const m = new MeshLambertMaterial({ color: p.color });
     if (p.emissive != null) { m.emissive.set(p.emissive); m.emissiveIntensity = p.emissiveIntensity ?? 1; }
@@ -547,7 +550,7 @@ export function showLegalTargets(rooms: string[]): void {
   }
   for (const roomId of rooms) {
     const [x, z] = ROOM_POS[roomId]!;
-    const g = new Mesh(new TorusGeometry(0.4, 0.05, 8, 20), new MeshBasicMaterial({ color: theme.accent, transparent: true, opacity: 0.75 }));
+    const g = new Mesh(new TorusGeometry(0.4, 0.05, 8, 20), new MeshBasicMaterial({ color: own(theme.accent), transparent: true, opacity: 0.75 }));
     g.rotation.x = PI / 2;
     g.position.set(x, 0.42, z);
     previews.add(g);
