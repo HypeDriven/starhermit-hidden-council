@@ -12,8 +12,7 @@
 //   FXAA / MSAA) is renderer.ao / bloom / grade / antialias; adaptive
 //   resolution, the pixel-ratio cap, render scale and the frame-rate readout
 //   are the runtime's.
-// - Light intensities are three.js r185's divided by π (the engine's convention).
-// - The shadow camera's fitted box is the light's shadow distance.
+// - Lights, the fitted shadow box and the RoomEnvironment (lowered as r183+) are the page's.
 // - Procedural canvas textures paint on an OffscreenCanvas (starhermit:canvas).
 // - Transparent pawn shells write depth (three.js's default for transparent
 //   materials; the engine writes none for blended ones unless asked).
@@ -148,9 +147,9 @@ let insets = { l: 0, r: 0 };
 let aspect = 16 / 9;
 
 const camera = new PerspectiveCamera(CAM_FRAME.fov, 16 / 9, 0.1, 200);
-const keyLight = new DirectionalLight(0xffd9a0, 2.4 / PI);
-const fillLight = new HemisphereLight(0x4a5a8a, 0x1a1420, 0.9 / PI);
-const rimLight = new DirectionalLight(0xffb54d, 0.5 / PI);
+const keyLight = new DirectionalLight(0xffd9a0, 2.4);
+const fillLight = new HemisphereLight(0x4a5a8a, 0x1a1420, 0.9);
+const rimLight = new DirectionalLight(0xffb54d, 0.5);
 const raycaster = new Raycaster();
 const LAYER_GAME = 1;
 raycaster.layers.set(LAYER_GAME);
@@ -172,7 +171,9 @@ function build(): void {
   keyLight.position.set(6, 12, 8);
   keyLight.shadow.bias = -0.0006;
   keyLight.shadow.normalBias = 0.02;
-  keyLight.shadow.distance = 32;
+  // The page's shadow box: the deck slab (22 × 18 at z = 4) plus the gear ring.
+  Object.assign(keyLight.shadow.camera, { left: -13, right: 13, top: 11, bottom: -11, near: 4, far: 32 });
+  keyLight.shadow.camera.updateProjectionMatrix();
   rimLight.position.set(-5, 6, -8);
   scene.add(keyLight, keyLight.target, fillLight, rimLight);
   marker.rotation.x = PI / 2;
@@ -406,11 +407,15 @@ export function applyLook(next: Look): void {
   if (shadows) keyLight.shadow.mapSize = next.shadows;
   // Image-based lighting from a neutral room environment.
   if (next.reflections && !envTex) {
-    try { envTex = new PMREMGenerator(renderer).fromScene(new RoomEnvironment(renderer), 0.04).texture; } catch (e) { console.warn(`environment: ${String(e)}`); }
+    try {
+      const room = new RoomEnvironment(renderer);
+      room.position.y = -3.5; // three.js r183+ lowers the room
+      envTex = new PMREMGenerator(renderer).fromScene(room, 0.04).texture;
+    } catch (e) { console.warn(`environment: ${String(e)}`); }
   }
   scene.environment = next.reflections ? envTex : null;
   scene.environmentIntensity = 0.22;
-  fillLight.intensity = (next.reflections ? 0.7 : 0.9) / PI;
+  fillLight.intensity = next.reflections ? 0.7 : 0.9;
   if (motes && moteGeo) { motes.visible = active && next.particles !== "off"; moteGeo.setDrawRange(0, b.motes); }
   // Post: GTAO contact darkening, bloom limited to lamps and highlights (threshold 0.9),
   // the colour grade (gentle S-curve, saturation, warm/cool split, black lift) with vignette.

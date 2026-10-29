@@ -18,7 +18,7 @@ station's tasks, and work out which of you is winding the machine backwards.
 | Players | 1 human seat + 3–11 automata solo; up to 12 seats in hosted rooms |
 | Session length | ~2–8 minutes (par is 30–100 ticks depending on stage) |
 | Platforms | A StarHermit engine script game: natively in the StarHermit client, in browsers by the engine's web runtime; desktop and phones, portrait and landscape |
-| Engine | StarHermit engine 1.24.0 (`engine.version=1.24.0`, host API minor 19, capabilities `platform,storage,clipboard`) |
+| Engine | StarHermit engine 1.26.1 (`engine.version=1.26.1`, `engine.minor=28`, capabilities `platform,storage,clipboard`) |
 | Rendering | `starhermit:scene` procedural station (three.js-like) under a `starhermit:ui` immediate-mode interface; post effects are the renderer's (AO, bloom, grade, anti-aliasing) |
 | Build | None: the engine imports the TypeScript entry (`native/main.ts`) and the shared ES modules in `src/` directly; `npm run package` writes the web loader `index.html` and `starhermit-files.json` |
 
@@ -343,9 +343,8 @@ selection is a pulsing ring on its own render layer. Reduced motion shortens the
 suppresses idle animation in the renderer (lamp shimmer and drifting motes also stop under the
 OS `prefers-reduced-motion` preference).
 
-**Graphics.** ACES filmic tone mapping; a warm key directional light (shadow distance fitted to
-the deck), a hemisphere fill and an accent rim light (three.js r185 intensities ÷ π, the engine's
-convention); a radial sky-glow background with distance fog in the theme's sky colour; nothing is
+**Graphics.** ACES filmic tone mapping; a warm key directional light (shadow box fitted to
+the deck slab and gear ring), a hemisphere fill and an accent rim light (three.js r185 intensities); a radial sky-glow background with distance fog in the theme's sky colour; nothing is
 drawn behind the menus. Surfaces: riveted deck plates, turned-brass pad dials and slatted
 corridor gratings are procedural canvas textures (colour + bump) on Balanced and up; pawns are
 clear-coated `MeshPhysicalMaterial` on High/Ultra, plain PBR on Balanced, Lambert on Low; each
@@ -460,7 +459,7 @@ override and preferred-language lookup are the runtime's now.
 
 `starhermit.txt`: `name`, `description`, `owner`, `server=server.js`, `version=1.1.0`,
 `cover=cover.jpg`, `launch=index.html`, `engine.api=1`, `engine.entry=native/main.ts`,
-`engine.version=1.24.0`, `engine.minor=19`, `engine.capabilities=platform,storage,clipboard`, the
+`engine.version=1.26.1`, `engine.minor=28`, `engine.capabilities=platform,storage,clipboard`, the
 eight `control.*` actions with `engine.gamepad.*` defaults and two Options groups.
 
 * *Player* — signed in (the StarHermit client's player, or the page's launch in browsers) or a
