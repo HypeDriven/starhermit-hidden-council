@@ -423,7 +423,7 @@ function topBar(): void {
     const inner = VW - 24;
     ui.row("hud-row", () => {
       if (ui.id("pause").style("btn-top").button(T("⏸ Pause"))) A.pauseGame();
-      // ⌖ draws as a missing glyph on the 1.22.0 web runtime: the map emoji instead.
+      // ⌖ draws as a missing glyph on the 1.23.0 web runtime: the map emoji instead.
       if (ui.id("map").style("btn-top").button(T("⌖ Map").replace("⌖", "🗺️"), { selected: app.overview, tooltip: T("Toggle station overview / room view") })) A.toggleMap();
       const drawers = !wide() && !phone();
       const cw = Math.max(40, inner - 260 - (drawers ? 260 : 0));
