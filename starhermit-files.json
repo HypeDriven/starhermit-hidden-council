@@ -6,7 +6,7 @@
     "assets/ui-style.json": {"sha256": "e1ff8f690e5bd9566f61a93a73f9c1c6572333ed7a05049274e65420c9f21f47", "size": 10608},
     "cover.jpg": {"sha256": "5129483a399d8c4ca6520015f45fff96b4715dfc646c617c18aa6e913ed1c724", "size": 337307},
     "icon.png": {"sha256": "e3e4040897a9532fb2cb13a5e891b11f4324cd67851687c754bd4abd99b54fcc", "size": 11247},
-    "index.html": {"sha256": "7fa842aa4deb649e83943a3e4b2248c5544c13166ee2acc4e1484134f4d1fca9", "size": 1784},
+    "index.html": {"sha256": "c8a4346f1e3695928758f61bd6ea340fc353f8b10a5cefdd2651cb9238a5dcc0", "size": 1784},
     "native/app.ts": {"sha256": "dcfc8469c056893da4644e7ad010877f2ce9fc95fb7b62598f90db8f609f559d", "size": 21570},
     "native/audio.ts": {"sha256": "207d3e5c24fcca7aa098dd0097d3cc5cc1622efd14dcfbf093cdbb967ce26383", "size": 7593},
     "native/i18n.ts": {"sha256": "49bad159cf27627c3fa98dc93706011c6ade9981f893105f32c321830d7c7372", "size": 1078},
@@ -45,7 +45,7 @@
     "src/session.js": {"sha256": "e78610100e562b68d6046dc0055a57399e934ac44f2f9b20dd815ca37dfc0036", "size": 12452},
     "src/strings.js": {"sha256": "44f0a2b45e8fae7afe37b2fae118eed081fd8968d949df4b4dfc2e98f2e97632", "size": 55019},
     "src/util.js": {"sha256": "4d52a0debb1ef5d0fbc8681783e6fa943a34cc33baa83f6d66e1a43f5bceac43", "size": 2569},
-    "starhermit.txt": {"sha256": "053587cfface3d91eb2a6dbcea16e2c246f9d98286475f67cb1b2d86c8f38fe1", "size": 1616}
+    "starhermit.txt": {"sha256": "341b9e20987b959aeddd4e2b079378ac28d982e6fa9d664e1104c18fd651d61c", "size": 1616}
   },
   "excluded": ["coverart.png", "leaderboards.json", "node_modules/", "package-lock.json", "package.json", "spec.md", "tests/", "tools/", "tsconfig.json"],
   "format": 1
