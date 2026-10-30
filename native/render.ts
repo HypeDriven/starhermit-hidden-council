@@ -426,9 +426,10 @@ export function applyLook(next: Look): void {
   };
   renderer.bloom = next.bloom ? { strength: 0.32, radius: 0.3, threshold: 0.9, resolution: b.bloomRes } : null;
   renderer.grade = next.grade ? {
-    // the old shader: s-curve mixed in at 0.22, saturation 1.1, cool shadows / warm highlights, slight black lift
-    space: "display", contrast: 0.12, saturation: 1.1,
-    shadows: [0.97, 1.0, 1.08], highlights: [1.05, 1.0, 0.94], split: [0.15, 0.8],
+    // the old shader after OutputPass: the 0.22 smoothstep S-curve, saturation 1.1, cool shadows / warm highlights,
+    // the s * 0.97 + 0.018 black lift (display levels)
+    space: "display", contrastCurve: "s", contrast: 0.22, saturation: 1.1, levels: [0.97, 0.018],
+    shadows: [0.95, 0.98, 1.06], highlights: [1.05, 1.0, 0.94], split: [0.15, 0.8],
     vignette: { amount: 0.28, inner: 0.38, outer: 0.9 },
   } : null;
   renderer.antialias = next.antialias;
