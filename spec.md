@@ -255,7 +255,8 @@ labels in the HUD and Help show the current binding):
 | Any legal action | — | D-pad to focus, South to press | Click / tap its button in the action rail | Issues the command; `ack` cue |
 | Move by the station | — | — | Click / tap a room in the 3D station | `move` if legal, else `reject` cue and "not a legal target" caption |
 | Vote / eliminate by pawn | — | — | Click / tap a pawn | `vote` in a council, `eliminate` when legal, else reject |
-| `prev_target` / `next_target` | ←/↑, →/↓ | LB / RB | — | Cycle legal move targets; the camera follows; caption "Target: <room>"; Shift + → moves at once |
+| `prev_target` / `next_target` | ←/↑, →/↓ | LB / RB | — | Cycle legal move targets; the camera follows; caption "Target: <room>"; with `quick_move` held, next target moves at once |
+| `quick_move` | Shift (hold) | — | — | Held with `next_target`: move to the new target at once |
 | `commit` | Enter, Numpad Enter | RT | — | Move to the focused target (when no button has focus) |
 | `wait` | Space | Select | "Wait" button | Passes a tick (when no button has focus) |
 | `undo` | U | West | "↩ Undo (U)" button (practice and tutorials) | Pops the snapshot; `undo` cue |
@@ -349,12 +350,15 @@ drawn behind the menus. Surfaces: riveted deck plates, turned-brass pad dials an
 corridor gratings are procedural canvas textures (colour + bump) on Balanced and up; pawns are
 clear-coated `MeshPhysicalMaterial` on High/Ultra, plain PBR on Balanced, Lambert on Low; each
 room's lamp bulb blooms. The runtime owns the Graphics options (Auto and the level 0–9, render
-scale, adaptive resolution, frame-rate limit and readout); `native/quality.ts` maps its tier
-(`frame().quality`) to the browser build's presets:
+scale, adaptive resolution, frame-rate limit and readout). Shadows and their map size, ambient
+occlusion (resolution, samples), bloom resolution, the grade and anti-aliasing are the level's own
+(`levelSettings()`; the table shows them at each tier's anchor level); Low keeps MSAA where the
+level says no anti-aliasing (engine 1.36.1 recolours fog and translucent overlays without it; until
+engine 1.36.2). `native/quality.ts` maps the tier to the browser build's art presets:
 
 | Look | Low | Balanced | High | Ultra |
 |---|---|---|---|---|
-| Shadows (map, held to the level) | off | 1024 | 2048 | 4096 |
+| Shadows (the level's map size) | off | 1024 | 2048 | 4096 |
 | Ambient occlusion | off | off | on | high |
 | Bloom (threshold 0.9) / colour grade + vignette | off | on | on | on |
 | Anti-aliasing | MSAA | FXAA | SMAA | MSAA |
@@ -363,7 +367,7 @@ scale, adaptive resolution, frame-rate limit and readout); `native/quality.ts` m
 | Deck texture (pads ≤ 512², gratings ¼); surface detail | — plain | 256² | 512² | 1024² |
 | Decorative gears (plain detail shows ≤ 8) | 6 | 10 | 14 | 20 |
 | Round-geometry segments | ×0.5 | ×0.75 | ×1 | ×1.5 |
-| Dust motes (Balanced draws a third; ×1.64 per level above the tier's floor, ≤ 4×) | off | 480 | 520 | 800 |
+| Dust motes (Balanced draws a third; × the level's particle budget over the tier's anchor level, ≤ 4×) | off | 480 | 520 | 800 |
 | Frosted rails and dialog backdrop | no | no | yes | yes |
 | AO / bloom resolution | ½ | ½ | ½ | full |
 

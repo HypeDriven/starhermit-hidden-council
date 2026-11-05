@@ -404,7 +404,7 @@ export function applyLook(next: Look): void {
   const shadows = next.shadows > 0;
   renderer.shadowMap.enabled = shadows;
   keyLight.castShadow = shadows;
-  if (shadows) keyLight.shadow.mapSize = next.shadows;
+  if (shadows) keyLight.shadow.mapSize = next.shadows; // the level's size: at minor 23+ the engine keeps the game's mapSize
   // Image-based lighting from a neutral room environment.
   if (next.reflections && !envTex) {
     try {
@@ -419,12 +419,13 @@ export function applyLook(next: Look): void {
   if (motes && moteGeo) { motes.visible = active && next.particles !== "off"; moteGeo.setDrawRange(0, b.motes); }
   // Post: GTAO contact darkening, bloom limited to lamps and highlights (threshold 0.9),
   // the colour grade (gentle S-curve, saturation, warm/cool split, black lift) with vignette.
-  renderer.ao = next.ao === "off" ? null : {
+  const ao = next.ao, fullAo = !!ao && ao.resolution >= 1; // the engine's "high" AO: full resolution
+  renderer.ao = ao && {
     blendIntensity: 0.75, radius: 0.6, distanceExponent: 1.4, thickness: 1.2, scale: 1.0,
-    samples: next.ao === "high" ? 16 : 8, resolution: b.aoRes,
-    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: next.ao === "high" ? 6 : 4, rings: 2, samples: next.ao === "high" ? 16 : 8, radiusExponent: 2 },
+    samples: ao.samples, resolution: ao.resolution,
+    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: fullAo ? 6 : 4, rings: 2, samples: ao.denoiseSamples, radiusExponent: 2 },
   };
-  renderer.bloom = next.bloom ? { strength: 0.32, radius: 0.3, threshold: 0.9, resolution: b.bloomRes } : null;
+  renderer.bloom = next.bloom !== null ? { strength: 0.32, radius: 0.3, threshold: 0.9, resolution: next.bloom } : null;
   renderer.grade = next.grade ? {
     // the old shader after OutputPass: the 0.22 smoothstep S-curve, saturation 1.1, cool shadows / warm highlights,
     // the s * 0.97 + 0.018 black lift (display levels)

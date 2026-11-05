@@ -49,8 +49,18 @@ function textWidth(text: string, style: string[], kind: "button" | "label" = "bu
   return ui.measureText(text, { kind, style }).width / SCALE;
 }
 type Item = { label: string; cls?: string; run: () => void; id?: string; full?: boolean; opts?: ui.ButtonOptions };
-/** Buttons wrapped into rows that fit `width` (rows do not flex-wrap); `grow` stretches each row's buttons. */
+/** Buttons wrapped into rows that fit `width` (ui.row wrap); `grow` and `full` items stretch their
+ * line's buttons, which needs the lines, so they keep the packer. */
 function buttonRows(id: string, items: Item[], width: number, { justify = "start" as ui.Align, grow = false, gap = 10 } = {}): void {
+  if (!grow && !items.some((it) => it.full)) {
+    ui.row(`${id}-rows`, () => {
+      for (const it of items) {
+        const style = ui.style(it.cls || "btn");
+        if ((it.id ? style.id(it.id) : style).button(it.label, it.opts ?? {})) it.run();
+      }
+    }, { wrap: true, width, gap, justify });
+    return;
+  }
   const rows: Item[][] = [];
   let cur: Item[] = [], used = 0;
   for (const it of items) {

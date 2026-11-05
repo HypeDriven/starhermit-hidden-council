@@ -12,9 +12,10 @@
 // because a live synthesis graph makes clip loads fail on the engine's web
 // runtime (the arrow-exodus port's finding); for the same reason the
 // synthesized stand-ins the browser build played while a clip decoded are not
-// ported, so a clip still loading is silent (its caption still shows). Clips
-// load once the mixer runs (natively at once, in a browser after the first
-// press), one at a time.
+// ported, so a clip still loading is silent (its caption still shows). The
+// clips all load at once in onStart (every loaded clip reaches the mixer,
+// natively and on the web); the beds render and start once the mixer runs
+// (in a browser after the first press).
 import { context, createClip, loadClip, play as playClip, type AudioClip, type Bus, type Sound } from "starhermit:audio";
 import { rand01 } from "../src/util.js";
 
@@ -40,23 +41,17 @@ const BUS: Record<Cue, Bus> = {
 const EFFECTS = 0.8, MUSIC = 0.6, AMBIENCE = 0.5;
 
 const clips = new Map<string, AudioClip>();
-const queue: string[] = [];
-let loading = false;
-let wantClips = false;
 let suspended = false;
 let captionHook: ((key: string) => void) | null = null;
 /** fn(key) for each cue's caption (a translation key). */
 export function onCaption(fn: (key: string) => void): void { captionHook = fn; }
 
-function load(name: string): void { if (!queue.includes(name) && !clips.has(name)) queue.push(name); }
-function pump(): void {
-  if (loading || !queue.length) return;
-  const name = queue.shift()!;
-  loading = true;
-  loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); loading = false; }, (e: unknown) => { console.warn(`sfx ${name}: ${String(e)}`); loading = false; });
+/** Loads every clip at once (onStart); a cue whose clip is still loading is skipped. The beds start once the mixer runs (see update). */
+export function loadSfx(): void {
+  for (const name of new Set(Object.values(SAMPLES).flat())) {
+    loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); }, (e: unknown) => console.warn(`sfx ${name}: ${String(e)}`));
+  }
 }
-/** Asks for the clips and the beds; they start once the mixer runs (see update). */
-export function loadSfx(): void { wantClips = true; }
 
 /** Plays a cue (a variant chosen from the seed, as the browser build did) and shows its caption. */
 export function event(kind: Cue, seed = 1): void {
@@ -67,7 +62,7 @@ export function event(kind: Cue, seed = 1): void {
   const clip = clips.get(file);
   if (!clip || suspended) return;
   try { playClip(clip, { bus: BUS[kind], gain: EFFECTS }); }
-  catch { clips.delete(file); load(file); } // a clip the mixer lost: load it again
+  catch { /* the mixer is full this frame: skip it */ }
 }
 
 // -- the beds, rendered once ---------------------------------------------------------------
@@ -135,15 +130,9 @@ export function setSuspended(on: boolean): void {
   }
 }
 
-/** Each frame: the clips once the mixer runs (one at a time), then the beds' loops (one a frame). */
+/** Each frame once the mixer runs: the beds' loops (one a frame). */
 export function update(): void {
-  if (context.state !== "running") return;
-  if (wantClips) {
-    wantClips = false;
-    for (const names of Object.values(SAMPLES)) for (const n of names) load(n);
-    return;
-  }
-  pump();
+  if (context.state !== "running") return; // rendering and starting the beds still waits for the mixer
   if (suspended || bedsFailed) return;
   try {
     if (!beds) { beds = { bed: bedClip(), pad: padClip() }; return; }

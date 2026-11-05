@@ -1,0 +1,26 @@
+# Graphics-tier bench (tools/engine-tier-bench.mjs): a Practice session (difficulty 1) measured in
+# play from the session's start (any layout): move targets cycled (the camera flies between rooms)
+# while the council's pawns move; the station's lamps, gears, dust motes and post effects.
+until 600 Hidden Council
+frames 30
+click =▶ Play
+until 120 Choose Your Session
+frames 10
+click =Practice
+until 120 Unranked. Restart and undo
+frames 10
+click =Difficulty 1
+until 300 Pause
+frames 30
+measure start
+key ArrowRight 1
+frames 60
+key ArrowRight 1
+frames 60
+key ArrowDown 1
+frames 60
+key ArrowLeft 1
+frames 60
+key ArrowRight 1
+frames 60
+measure stop

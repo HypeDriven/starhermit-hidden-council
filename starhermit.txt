@@ -26,6 +26,7 @@ control.wait=Space | Wait
 control.commit=Enter+NumpadEnter | Go to focused room
 control.prev_target=ArrowLeft+ArrowUp | Previous move target
 control.next_target=ArrowRight+ArrowDown | Next move target
+control.quick_move=ShiftLeft+ShiftRight | Quick move (hold with next target)
 engine.group.pause=Session
 engine.group.commit=Move targets
 

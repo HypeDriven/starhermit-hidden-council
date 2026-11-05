@@ -6,8 +6,8 @@
 // server.js (src/hosted.js); the screens and HUD are starhermit:ui
 // (screens.ts), the station starhermit:scene (render.ts), the controller
 // app.ts, saves and the platform platform.ts.
-import { frame, onFixedUpdate, onPreferencesChange, onQuit, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate } from "starhermit:engine";
-import { isKeyDown, onAction, onPointerButton, onTouch } from "starhermit:input";
+import { frame, levelSettings, onFixedUpdate, onPreferencesChange, onQuit, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate } from "starhermit:engine";
+import { isDown, onAction, onPointerButton, onTouch } from "starhermit:input";
 import { onSessionEnded } from "starhermit:platform";
 import * as ui from "starhermit:ui";
 import { shStrings } from "../src/platform-i18n.js";
@@ -67,8 +67,8 @@ onAction((e) => {
     case "prev_target":
     case "next_target": {
       ui.setFocus(null);
-      const shift = isKeyDown("ShiftLeft") || isKeyDown("ShiftRight");
-      A.cycleTarget(e.action === "prev_target" ? -1 : 1, e.action === "next_target" && shift);
+      // Next target with quick move held (Shift by default; players rebind it in Options) moves at once.
+      A.cycleTarget(e.action === "prev_target" ? -1 : 1, e.action === "next_target" && isDown("quick_move"));
       return;
     }
     default:
@@ -112,10 +112,10 @@ function handlePointer(): void {
 let lookKey = "";
 function applyLook(): void {
   const f = frame();
-  const key = `${f.quality}:${f.levelIndex}`;
+  const key = f.level;
   if (key === lookKey) return;
   lookKey = key;
-  const look = lookFor(f.quality, f.levelIndex);
+  const look = lookFor(levelSettings(f.level));
   setHudBlur(look.budget.hudBlur);
   render.applyLook(look);
 }
