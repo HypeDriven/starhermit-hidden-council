@@ -352,9 +352,7 @@ clear-coated `MeshPhysicalMaterial` on High/Ultra, plain PBR on Balanced, Lamber
 room's lamp bulb blooms. The runtime owns the Graphics options (Auto and the level 0–9, render
 scale, adaptive resolution, frame-rate limit and readout). Shadows and their map size, ambient
 occlusion (resolution, samples), bloom resolution, the grade and anti-aliasing are the level's own
-(`levelSettings()`; the table shows them at each tier's anchor level); Low keeps MSAA where the
-level says no anti-aliasing (engine 1.36.1 recolours fog and translucent overlays without it; until
-engine 1.36.2). `native/quality.ts` maps the tier to the browser build's art presets:
+(`levelSettings()`; the table shows them at each tier's anchor level); `native/quality.ts` maps the tier to the browser build's art presets:
 
 | Look | Low | Balanced | High | Ultra |
 |---|---|---|---|---|
