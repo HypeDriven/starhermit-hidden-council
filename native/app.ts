@@ -20,8 +20,7 @@ import { SoloSession, setSessionTimers } from "../src/session.js";
 import { THEMES, JOURNEY, TUTORIALS, dailyStage, practiceStage, challengeStage } from "../src/content.js";
 import { CouncilClient } from "../src/hosted.js";
 import { logText, roomName, rejectText, hintText } from "../src/labels.js";
-import { shStrings, fmt } from "../src/platform-i18n.js";
-import { T } from "./i18n.ts";
+import { sh, T } from "./i18n.ts";
 import * as render from "./render.ts";
 import * as audio from "./audio.ts";
 import * as platform from "./platform.ts";
@@ -31,7 +30,6 @@ type Any = any;
 
 export type Screen = "title" | "modes" | "setup" | "tutorials" | "journey" | "practice" | "challenges" | "hosted" | "settings" | "help" | "game";
 export type Modal = "pause" | "help" | "results" | null;
-export type Toast = { text: string; until: number };
 export interface ResultsMeta { board: "loading" | platform.BoardRow[] | null | undefined; lbLine: string | null }
 
 export const app = {
@@ -51,7 +49,6 @@ export const app = {
   assists: true,
   tutorial: null as null | { def: Any; step: number; humanActed: boolean },
   caption: null as null | { text: string; until: number },
-  toasts: [] as Toast[],
   focusIndex: 0,
   drawer: null as null | "left" | "right",
   overview: false,
@@ -83,7 +80,6 @@ export function tick(stepMs: number): void {
     timers = timers.filter((t) => t.at > clock.ms);
     for (const t of due) t.fn();
   }
-  if (app.toasts.length) app.toasts = app.toasts.filter((t) => t.until > clock.ms);
   if (app.caption && app.caption.until <= clock.ms) app.caption = null;
 }
 
@@ -98,8 +94,7 @@ export function announce(msg: string, assertive = false): void {
 }
 export function caption(text: string): void { app.caption = { text, until: clock.ms + 2500 }; }
 export function toast(text: string): void {
-  app.toasts.push({ text, until: clock.ms + 3500 });
-  if (app.toasts.length > 3) app.toasts.shift();
+  ui.toast!(text, { duration: 3.5, style: ["toast", "accent"], dismissible: false });
 }
 audio.onCaption((key) => caption(T(key)));
 export function cue(kind: audio.Cue, seed = 1): void { audio.event(kind, seed); }
@@ -400,13 +395,12 @@ function onEnd(result: Any): void {
       // On the platform: Journey, Daily and Challenge rounds post their total
       // through server.js (high-score board); Tutorial and Practice post nothing.
       const ranked = /^(journey|daily|challenge)-/.test(app.stage.id || "");
-      app.meta = { board: "loading", lbLine: ranked ? shStrings().lbPosting : null };
+      app.meta = { board: "loading", lbLine: ranked ? sh("leaderboardPosting") : null };
       const session = app.session;
       const posted = ranked ? platform.postScore(result.score.total) : Promise.resolve(null);
       void posted.then((r) => platform.topTen().then((board) => {
         if (app.phase !== "results" || app.session !== session) return;
-        const S = shStrings();
-        app.meta = { board, lbLine: r ? (!r.posted ? S.lbNotPosted : r.rank ? fmt(S.lbRank, { rank: r.rank }) : S.lbPosted) : null };
+        app.meta = { board, lbLine: r ? (!r.posted ? sh("leaderboardNotPosted") : r.rank ? sh("leaderboardRank", { rank: r.rank }) : sh("leaderboardPosted")) : null };
       }));
     }
   }
@@ -425,8 +419,7 @@ export function copyHash(): void {
 export function copyInvite(): void {
   const link = platform.inviteLink();
   if (!link) return;
-  const S = shStrings();
-  try { clipboard.writeText(link); toast(S.copied); announce(S.copied); } catch { toast(fmt(S.copyFailed, { link })); }
+  try { clipboard.writeText(link); toast(sh("inviteCopied")); } catch { toast(sh("inviteLink", { link })); }
 }
 export function signIn(): void { void requestSignIn().catch(() => undefined); }
 export function setProfileName(name: string): void {
@@ -444,7 +437,7 @@ function councilHooks(): Any {
     onState: (s: Any, events: Any[]) => { if (app.council) onState(s, events); },
     onOver: (result: Any) => { if (app.council) onEnd(result); },
     onReject: (reason: string) => onReject(reason),
-    onAuthLost: () => { toast(shStrings().signedOut); showTitle(); },
+    onAuthLost: () => { toast(sh("signedOut")); showTitle(); },
     onUnavailable: () => {
       if (app.phase === "results") return;
       toast(T("The council room is no longer available. Your progress on this device is safe."));

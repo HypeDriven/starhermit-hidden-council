@@ -7,11 +7,10 @@
 // (screens.ts), the station starhermit:scene (render.ts), the controller
 // app.ts, saves and the platform platform.ts.
 import { frame, levelSettings, onFixedUpdate, onPreferencesChange, onQuit, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate } from "starhermit:engine";
-import { isDown, onAction, onPointerButton, onTouch } from "starhermit:input";
+import { isDown, onAction, onGesture } from "starhermit:input";
 import { onSessionEnded } from "starhermit:platform";
 import * as ui from "starhermit:ui";
-import { shStrings } from "../src/platform-i18n.js";
-import { initLanguage } from "./i18n.ts";
+import { sh } from "./i18n.ts";
 import * as render from "./render.ts";
 import * as audio from "./audio.ts";
 import * as platform from "./platform.ts";
@@ -25,7 +24,6 @@ const STEP_MS = 1000 / 60;
 
 onStart(() => {
   setFixedRate(60);
-  initLanguage();
   initStyles();
   platform.initPlatform();
   platform.onOptionsChange(() => A.applySettings());
@@ -36,7 +34,7 @@ onStart(() => {
   A.showTitle();
 });
 onPreferencesChange((p) => render.setReducedMotion(p.reducedMotion));
-onSessionEnded(() => A.toast(shStrings().signedOut));
+onSessionEnded(() => A.toast(sh("signedOut")));
 
 let hidden = false;
 onSuspend(() => {
@@ -77,36 +75,11 @@ onAction((e) => {
 
 // ------------------------------------------------------------------ taps and clicks on the station
 // A tap or click picks a room or pawn; a drag past 12 px or a press held past
-// 500 ms commits nothing (the old canvas gesture rule). Presses are decided
-// after the frame's UI is built, so one over a widget (ui.pointerOver) is the
-// widget's.
-type Press = { x: number; y: number; t: number; overUi: boolean };
-let press: Press | null = null;
-const pending: { kind: "down" | "up"; x: number; y: number }[] = [];
-let lastTouch = -1e9;
-onPointerButton((e) => {
-  if (e.button !== 0 || A.clock.ms - lastTouch < 600) return;
-  pending.push({ kind: e.pressed ? "down" : "up", x: e.x, y: e.y });
+// 500 ms commits nothing (the old canvas gesture rule, the engine's tap). A
+// press over a widget is the widget's.
+onGesture!((e) => {
+  if (e.type === "tap" && inPlay() && !ui.pointerOver()) A.tapStation(e.x, e.y);
 });
-onTouch((e) => {
-  if (!e.primary || e.control) return;
-  lastTouch = A.clock.ms;
-  if (e.phase === "start") pending.push({ kind: "down", x: e.x, y: e.y });
-  else if (e.phase === "end") pending.push({ kind: "up", x: e.x, y: e.y });
-  else if (e.phase === "cancel") press = null;
-});
-function handlePointer(): void {
-  const scale = frame().scale || 1;
-  while (pending.length) {
-    const p = pending.shift()!;
-    if (p.kind === "down") { press = { x: p.x, y: p.y, t: A.clock.ms, overUi: ui.pointerOver() }; continue; }
-    const d = press;
-    press = null;
-    if (!d || d.overUi || !inPlay()) continue;
-    if (Math.hypot(p.x - d.x, p.y - d.y) >= 12 * scale || A.clock.ms - d.t >= 500) continue;
-    A.tapStation(p.x, p.y);
-  }
-}
 
 // ------------------------------------------------------------------ frame
 let lookKey = "";
@@ -131,7 +104,6 @@ onUpdate((dt) => {
 });
 onRender(() => {
   drawScreens();
-  handlePointer();
   const f = frame();
   render.update(frameDt, f.width, f.height, hidden || app.phase === "paused");
 });

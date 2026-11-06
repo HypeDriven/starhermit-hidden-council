@@ -7,16 +7,13 @@
 // the volumes and the mute): effects and voice → "effects", the
 // acknowledgement tick → "interface", music and ambience → "music"; the old
 // default bus levels (music 0.6, effects 0.8, ambience 0.5, voice 0.7) are
-// folded into each sound's gain. The bed and the pad are rendered once into
-// looping clips (createClip) with the old oscillators, filter and envelopes,
-// because a live synthesis graph makes clip loads fail on the engine's web
-// runtime (the arrow-exodus port's finding); for the same reason the
-// synthesized stand-ins the browser build played while a clip decoded are not
-// ported, so a clip still loading is silent (its caption still shows). The
-// clips all load at once in onStart (every loaded clip reaches the mixer,
-// natively and on the web); the beds render and start once the mixer runs
-// (in a browser after the first press).
-import { context, createClip, loadClip, play as playClip, type AudioClip, type Bus, type Sound } from "starhermit:audio";
+// folded into each sound's gain. The bed and the pad are rendered once offline
+// (OfflineAudioContext) into looping clips with the old oscillators, filter and
+// envelopes. The synthesized stand-ins the browser build played while a clip
+// decoded are not ported, so a clip still loading is silent (its caption still
+// shows). The clips load and the beds render at once in onStart; the beds start
+// once the mixer runs (in a browser after the first press).
+import { context, createClip, loadClip, OfflineAudioContext, play as playClip, type AudioClip, type Bus, type Sound } from "starhermit:audio";
 import { rand01 } from "../src/util.js";
 
 export type Cue =
@@ -46,11 +43,12 @@ let captionHook: ((key: string) => void) | null = null;
 /** fn(key) for each cue's caption (a translation key). */
 export function onCaption(fn: (key: string) => void): void { captionHook = fn; }
 
-/** Loads every clip at once (onStart); a cue whose clip is still loading is skipped. The beds start once the mixer runs (see update). */
+/** Loads every clip at once (onStart); a cue whose clip is still loading is skipped. The beds render here and start once the mixer runs (see update). */
 export function loadSfx(): void {
   for (const name of new Set(Object.values(SAMPLES).flat())) {
     loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); }, (e: unknown) => console.warn(`sfx ${name}: ${String(e)}`));
   }
+  Promise.all([renderBed(), renderPad()]).then(([b, p]) => { beds = { bed: b, pad: p }; }, (e: unknown) => console.warn(`audio beds: ${String(e)}`));
 }
 
 /** Plays a cue (a variant chosen from the seed, as the browser build did) and shows its caption. */
@@ -65,56 +63,50 @@ export function event(kind: Cue, seed = 1): void {
   catch { /* the mixer is full this frame: skip it */ }
 }
 
-// -- the beds, rendered once ---------------------------------------------------------------
+// -- the beds, rendered once offline ---------------------------------------------------------------
 const RATE = 8000;
-/** RBJ biquad low-pass in place (Web Audio's BiquadFilterNode). */
-function lowpass(x: Float32Array, freq: number, q: number): void {
-  const w = 2 * Math.PI * freq / RATE, alpha = Math.sin(w) / (2 * q), c = Math.cos(w);
-  const a0 = 1 + alpha;
-  const b0 = (1 - c) / 2 / a0, b1 = (1 - c) / a0, b2 = b0, a1 = -2 * c / a0, a2 = (1 - alpha) / a0;
-  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
-  for (let i = 0; i < x.length; i++) {
-    const x0 = x[i]!;
-    const y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
-    x2 = x1; x1 = x0; y2 = y1; y1 = y0;
-    x[i] = y0;
-  }
-}
-/** The machinery bed: the old seeded noise loop (2 s) through a 320 Hz low-pass, at its 0.5 gain; seamless. */
-function bedClip(): AudioClip {
-  const n = 2 * RATE, fade = Math.round(0.25 * RATE);
-  const raw = new Float32Array(n + fade);
-  let seed = 7;
-  for (let i = 0; i < raw.length; i++) { seed = (seed * 16807) % 2147483647; raw[i] = ((seed / 2147483647) * 2 - 1) * 0.25; }
-  lowpass(raw, 320, 0.707);
-  const out = raw.slice(0, n);
-  for (let i = 0; i < fade; i++) { const k = i / fade; out[i] = (raw[n + i]! * (1 - k) + raw[i]! * k) * 0.5; }
-  for (let i = fade; i < n; i++) out[i]! *= 0.5;
-  return createClip([out], RATE);
+const BED_GAIN = 0.125;
+/** The machinery bed: a 2 s seeded noise loop through a 320 Hz low-pass (Q 0.707, -3 dB in the engine's units), at its 0.5 gain; filtered periodic noise is periodic once settled, so no crossfade. */
+async function renderBed(): Promise<AudioClip> {
+  const n = 2 * RATE, settle = Math.round(0.25 * RATE);
+  const off = new OfflineAudioContext(1, settle + n, RATE);
+  const noise = off.createNoise({ seed: 7, seconds: 2 });
+  const lp = off.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 320;
+  lp.Q.value = -3.01;
+  const g = off.createGain();
+  g.gain.value = BED_GAIN;
+  noise.connect(lp).connect(g).connect(off.destination);
+  noise.start();
+  const r = await off.startRendering();
+  return createClip([r.getChannelData(0).slice(settle)], RATE);
 }
 /** The pad: 32 of the old 1.4 s steps (a sine from the seeded pentatonic scale, a triangle an octave down every 4th), looped. */
-function padClip(): AudioClip {
+async function renderPad(): Promise<AudioClip> {
   const scale = [261.6, 293.7, 329.6, 392, 440, 523.3];
   const steps = 32, stepLen = 1.4;
-  const n = Math.round(steps * stepLen * RATE);
-  const out = new Float32Array(n);
-  const voice = (start: number, f: number, dur: number, tri: boolean, gain: number): void => {
-    const len = Math.round((dur + 0.02) * RATE);
-    for (let i = 0; i < len; i++) {
-      const t = i / RATE;
-      const env = t < 0.008 ? (t / 0.008) * gain : gain * Math.pow(0.0001 / gain, Math.min(1, (t - 0.008) / (dur - 0.008)));
-      const ph = (t * f) % 1;
-      const s = tri ? 1 - 4 * Math.abs(ph - 0.5) : Math.sin(2 * Math.PI * ph);
-      out[(start + i) % n]! += s * env * 0.5;
-    }
+  const off = new OfflineAudioContext(1, Math.round(steps * stepLen * RATE), RATE);
+  const voice = (at: number, f: number, dur: number, type: "sine" | "triangle", gain: number): void => {
+    const osc = off.createOscillator();
+    osc.type = type;
+    osc.frequency.value = f;
+    const g = off.createGain();
+    g.gain.setValueAtTime(0, at);
+    g.gain.linearRampToValueAtTime(gain * 0.5, at + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001 * 0.5, at + dur);
+    osc.connect(g).connect(off.destination);
+    osc.start(at);
+    osc.stop(at + dur + 0.02);
   };
   for (let step = 0; step < steps; step++) {
     const f = scale[Math.floor(rand01(99, step) * scale.length)]!;
-    const at = Math.round(step * stepLen * RATE);
-    voice(at, f, 1.4, false, 0.05);
-    if (step % 4 === 0) voice(at, f / 2, 1.8, true, 0.04);
+    const at = step * stepLen;
+    voice(at, f, 1.4, "sine", 0.05);
+    if (step % 4 === 0) voice(at, f / 2, 1.8, "triangle", 0.04);
   }
-  return createClip([out], RATE);
+  const r = await off.startRendering();
+  return createClip([r.getChannelData(0)], RATE);
 }
 let bed: Sound | null = null;
 let pad: Sound | null = null;
@@ -130,12 +122,10 @@ export function setSuspended(on: boolean): void {
   }
 }
 
-/** Each frame once the mixer runs: the beds' loops (one a frame). */
+/** Each frame: the beds' loops start once they are rendered and the mixer runs. */
 export function update(): void {
-  if (context.state !== "running") return; // rendering and starting the beds still waits for the mixer
-  if (suspended || bedsFailed) return;
+  if (context.state !== "running" || suspended || bedsFailed || !beds) return;
   try {
-    if (!beds) { beds = { bed: bedClip(), pad: padClip() }; return; }
     if (!bed) { bed = playClip(beds.bed, { bus: "music", gain: AMBIENCE, loop: true }); return; }
     if (!pad) pad = playClip(beds.pad, { bus: "music", gain: MUSIC, loop: true });
   } catch (e) { console.warn(`audio beds: ${String(e)}`); bedsFailed = true; }

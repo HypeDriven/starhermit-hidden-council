@@ -1,9 +1,8 @@
 // Localization coverage: every English key the engine client (native/*.ts),
 // the shared labels (src/labels.js), the sound captions and the content use is
 // translated in every locale (en-GB → en-US, es-ES → es-419, fr-CA → fr-FR
-// inherit) with its placeholders, no table keeps unused rows, the account
-// strings exist in all nine locales, the runtime's language tags map to the
-// shipped locales, and station-log lines from the rules render translated.
+// inherit) with its placeholders, no table keeps unused rows, and station-log
+// lines from the rules render translated (tables: assets/strings.json).
 // Run: node --test tests/i18n.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,12 +11,19 @@ import { codeKeys, audit, LOCALES } from './i18n-common.mjs';
 
 const ROOT = new URL('../', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
-const { TABLES } = await import('../src/strings.js');
+const TABLES = JSON.parse(read('assets/strings.json'));
 const { JOURNEY, THEMES, TUTORIALS } = await import('../src/content.js');
 const { STATION_ROOMS, TASK_LABELS } = await import('../src/rules.js');
 const { LOG_FIXED, logText } = await import('../src/labels.js');
 const I18N = await import('../src/i18n.js');
-const { shStrings } = await import('../src/platform-i18n.js');
+/** The tables as native/i18n.ts binds them: a locale, then its parent. */
+const PARENT = { 'en-GB': 'en-US', 'es-ES': 'es-419', 'fr-CA': 'fr-FR' };
+let lang = 'en-US';
+const lookup = (k) => { for (let l = lang; l; l = PARENT[l]) if (Object.hasOwn(TABLES[l], k)) return TABLES[l][k]; return null; };
+I18N.bindStrings({
+  has: (k) => lookup(k) != null,
+  t: (k, vars) => lookup(k).replace(/\{(\w+)\}/g, (m, n) => (vars && n in vars ? vars[n] : m)),
+});
 
 function usedKeys() {
   const keys = new Set();
@@ -39,20 +45,13 @@ test('every used key is translated in every locale; placeholders intact; no unus
   assert.deepEqual(audit(TABLES, usedKeys()), []);
 });
 
-test('the account strings exist in all nine locales', () => {
-  const keys = Object.keys(shStrings('en-US')).sort();
-  for (const l of LOCALES) assert.deepEqual(Object.keys(shStrings(l)).sort(), keys, l);
-});
-
-test('the runtime\'s language tags map to the shipped locales; switching is live', () => {
-  const cases = { 'de-DE': 'de-DE', de: 'de-DE', 'es-MX': 'es-419', 'es-ES': 'es-ES', 'en-AU': 'en-GB', en: 'en-US', 'fr-CA': 'fr-CA', 'fr-BE': 'fr-FR', 'pt-PT': 'pt-BR', it: 'it-IT', ja: 'en-US' };
-  for (const [tag, want] of Object.entries(cases)) assert.equal(I18N.matchLocale(tag), want, tag);
-  I18N.setLocale('de-DE');
+test('switching is live; a deferred message renders in the language it is shown in', () => {
+  lang = 'de-DE';
   assert.equal(I18N.T('Settings'), 'Einstellungen');
   const msg = I18N.L('Room {code}', { code: 'AB12' });
-  I18N.setLocale('fr-CA');
+  lang = 'fr-CA';
   assert.equal(msg(), 'Salon AB12');
-  I18N.setLocale('en-US');
+  lang = 'en-US';
 });
 
 test('station log shapes from the rules engine are recognised and translated', () => {
@@ -62,8 +61,8 @@ test('station log shapes from the rules engine are recognised and translated', (
     'Farra was ejected from the station. They were loyal crew.', 'Gosse voted.', 'Hilde waited.', 'No one was ejected.',
   ];
   for (const text of lines) assert.equal(logText({ text }), text);
-  I18N.setLocale('de-DE');
+  lang = 'de-DE';
   try {
     for (const text of lines) assert.notEqual(logText({ text }), text, text);
-  } finally { I18N.setLocale('en-US'); }
+  } finally { lang = 'en-US'; }
 });

@@ -12,8 +12,7 @@ import { bindingLabel } from "starhermit:input";
 import * as ui from "starhermit:ui";
 import { THEMES, TUTORIALS, JOURNEY } from "../src/content.js";
 import { stageTitle, mechanicName, logText, roomName, playerName, taskLabel, reasonText, scorePartName, achievementName } from "../src/labels.js";
-import { shStrings } from "../src/platform-i18n.js";
-import { T } from "./i18n.ts";
+import { sh, T } from "./i18n.ts";
 import * as render from "./render.ts";
 import * as platform from "./platform.ts";
 import * as A from "./app.ts";
@@ -25,11 +24,10 @@ type Any = any;
 // ------------------------------------------------------------------ viewport and helpers
 let VW = 1280, VH = 720, SCALE = 1;
 function measureViewport(): void {
-  const f = frame();
-  SCALE = ui.preferences().scale || 1;
-  const sa = f.safeArea;
-  VW = Math.max(1, (f.width - sa.left - sa.right) / SCALE);
-  VH = Math.max(1, (f.height - sa.top - sa.bottom) / SCALE);
+  const v = ui.viewport!();
+  SCALE = v.scale || 1;
+  VW = Math.max(1, v.width);
+  VH = Math.max(1, v.height);
 }
 const wide = (): boolean => VW >= 1024;
 const phone = (): boolean => VW <= 700 && VH > VW;
@@ -138,7 +136,6 @@ const back = (): string => T("← Back");
 
 // ------------------------------------------------------------------ title
 function titleScreen(): void {
-  const S = shStrings();
   const d = A.save();
   const hc = ui.preferences().highContrast;
   screen("title", (w) => {
@@ -176,8 +173,8 @@ function titleScreen(): void {
       para(stats.slice(3), w, "muted");
     }
     const acct: Item[] = [{ id: "t-settings", label: T("⚙ Settings"), cls: "btn-subtle", run: () => A.showScreen("settings") }];
-    if (platform.signedIn()) { if (platform.inviteLink()) acct.push({ id: "t-invite", label: S.invite, cls: "btn-subtle", run: () => A.copyInvite() }); }
-    else acct.push({ id: "t-signin", label: S.signIn, cls: "btn-subtle", run: () => A.signIn() });
+    if (platform.signedIn()) { if (platform.inviteLink()) acct.push({ id: "t-invite", label: sh("invite"), cls: "btn-subtle", run: () => A.copyInvite() }); }
+    else acct.push({ id: "t-signin", label: sh("signIn"), cls: "btn-subtle", run: () => A.signIn() });
     buttonRows("title-acct", acct, w);
   }, { cls: hc ? "screen" : "screen-title", label: "Hidden Council" });
 }
@@ -555,17 +552,6 @@ function resultsDialog(): void {
   }, null);
 }
 
-// ------------------------------------------------------------------ toasts
-function toasts(): void {
-  if (!app.toasts.length) return;
-  ui.place("toasts", { anchor: "bottom", y: 16 }, () => {
-    for (const t of app.toasts) {
-      const max = Math.min(VW - 32, 560);
-      ui.column(`toast-${t.until}`, () => para(t.text, Math.min(max - 34, textWidth(t.text, ["accent"], "label") + 2), "accent"), { style: "toast" });
-    }
-  }, { spacing: 6, align: "center" });
-}
-
 // ------------------------------------------------------------------ the frame
 export function drawScreens(): void {
   measureViewport();
@@ -587,5 +573,4 @@ export function drawScreens(): void {
     else if (app.modal === "help") helpDialog();
     else if (app.modal === "results") resultsDialog();
   }
-  toasts();
 }
