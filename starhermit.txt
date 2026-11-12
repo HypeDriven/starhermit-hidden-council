@@ -40,3 +40,7 @@ engine.gamepad.wait=Select
 engine.gamepad.commit=RightTrigger
 engine.gamepad.prev_target=LeftShoulder
 engine.gamepad.next_target=RightShoulder
+
+# Game language (saved per player); Automatic follows the account/device.
+control.localization=F2 | Language
+engine.group.localization=Interface

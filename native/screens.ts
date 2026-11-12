@@ -1,3 +1,6 @@
+import { localizedStyle as __l10nStyle } from "./l10n/font.ts";
+// localization-runtime:attached
+import { openLocalizedOptions as __l10nOptions } from "./l10n/menu.ts";
 // Every screen, dialog and the in-session HUD on starhermit:ui, drawn each
 // frame from the app's state (the browser build's DOM screens in src/ui.js
 // and the layout rules of src/styles.css). Layout follows the old style
@@ -7,7 +10,16 @@
 // under the top bar and the action tray in the thumb zone, its buttons two
 // up. Menus are a centred card over the dim backdrop (the title over the key
 // art); Pause, Help in play and the results are dialogs over the station.
-import { frame, openMenu } from "starhermit:engine";
+// Every screen, dialog and the in-session HUD on starhermit:ui, drawn each
+// frame from the app's state (the browser build's DOM screens in src/ui.js
+// and the layout rules of src/styles.css). Layout follows the old style
+// sheet's breakpoints: both rails beside the station on wide windows (1024
+// logical px and up; 220 px rails when short); labelled drawers toggled from
+// the top bar on compact windows; on phones held upright the status panel
+// under the top bar and the action tray in the thumb zone, its buttons two
+// up. Menus are a centred card over the dim backdrop (the title over the key
+// art); Pause, Help in play and the results are dialogs over the station.
+import { frame } from "starhermit:engine";
 import { bindingLabel } from "starhermit:input";
 import * as ui from "starhermit:ui";
 import { THEMES, TUTORIALS, JOURNEY } from "../src/content.js";
@@ -35,13 +47,13 @@ const shortLandscape = (): boolean => VH <= 500 && VW > VH;
 let hudBlur = false;
 export function setHudBlur(v: boolean): void { hudBlur = v; }
 
-function lbl(text: string, cls = "text"): void { ui.style(cls).label(text); }
-function para(text: string, width: number, cls = "text"): void { ui.style(cls).paragraph(text, Math.max(40, width)); }
-function heading(text: string, cls = "h2"): void { ui.style(cls).heading(text); }
+function lbl(text: string, cls = "text"): void { ui.style(__l10nStyle(cls)).label(text); }
+function para(text: string, width: number, cls = "text"): void { ui.style(__l10nStyle(cls)).paragraph(text, Math.max(40, width)); }
+function heading(text: string, cls = "h2"): void { ui.style(__l10nStyle(cls)).heading(text); }
 /** A heading that wraps when it is wider than `w` (long titles, long translations, phones). */
 function title(text: string, w: number, cls = "title"): void {
-  if (textWidth(text, [cls], "label") <= w) ui.style(cls).heading(text);
-  else ui.style(cls).paragraph(text, Math.max(40, w));
+  if (textWidth(text, [cls], "label") <= w) ui.style(__l10nStyle(cls)).heading(text);
+  else ui.style(__l10nStyle(cls)).paragraph(text, Math.max(40, w));
 }
 function textWidth(text: string, style: string[], kind: "button" | "label" = "button"): number {
   return ui.measureText(text, { kind, style }).width / SCALE;
@@ -53,7 +65,7 @@ function buttonRows(id: string, items: Item[], width: number, { justify = "start
   if (!grow && !items.some((it) => it.full)) {
     ui.row(`${id}-rows`, () => {
       for (const it of items) {
-        const style = ui.style(it.cls || "btn");
+        const style = ui.style(__l10nStyle(it.cls || "btn"));
         if ((it.id ? style.id(it.id) : style).button(it.label, it.opts ?? {})) it.run();
       }
     }, { wrap: true, width, gap, justify });
@@ -73,7 +85,7 @@ function buttonRows(id: string, items: Item[], width: number, { justify = "start
     rows.forEach((row, ri) => ui.row(`${id}-r${ri}`, () => {
       const each = grow || row.some((r) => r.full) ? (width - gap * (row.length - 1)) / row.length : 0;
       for (const it of row) {
-        const style = each ? ui.style(it.cls || "btn", { width: each }) : ui.style(it.cls || "btn");
+        const style = each ? ui.style(__l10nStyle(it.cls || "btn"), __l10nStyle({ width: each })) : ui.style(__l10nStyle(it.cls || "btn"));
         if ((it.id ? style.id(it.id) : style).button(it.label, it.opts ?? {})) it.run();
       }
     }, { spacing: gap, justify, width }));
@@ -84,8 +96,8 @@ function wideButton(id: string, label: string, width: number, cls: string, run: 
   const pad = cls === "btn-action" ? 30 : 38;
   const fits = textWidth(label, [cls]) <= width;
   const pressed = fits
-    ? ui.id(id).style(cls, { width }).button(label, opts)
-    : ui.id(id).style(cls, { width }).button(label, { ...opts, content: () => ui.paragraph(label, Math.max(40, width - pad), { size }) });
+    ? ui.id(id).style(__l10nStyle(cls), __l10nStyle({ width })).button(label, opts)
+    : ui.id(id).style(__l10nStyle(cls), __l10nStyle({ width })).button(label, { ...opts, content: () => ui.paragraph(label, Math.max(40, width - pad), { size }) });
   if (pressed) run();
 }
 
@@ -141,7 +153,7 @@ function titleScreen(): void {
   screen("title", (w) => {
     title("Hidden Council", w);
     para(T("A clockwork station. A hidden hand. A council of gears."), w, "tagline");
-    if (ui.id("play").style("btn-play").button(T("▶ Play"))) { A.cue("ack"); A.showModeSelect(); }
+    if (ui.id("play").style(__l10nStyle("btn-play")).button(T("▶ Play"))) { A.cue("ack"); A.showModeSelect(); }
     const row: Item[] = [
       { id: "t-daily", label: T("Daily Chime"), run: () => A.startDaily() },
       { id: "t-journey", label: T("Journey"), run: () => A.showScreen("journey") },
@@ -223,7 +235,7 @@ function setupScreen(): void {
     }, { spacing: 4, width: w });
     const a = ui.checkbox(T("Assists (hints + target preview)"), f.assists);
     if (a !== f.assists) { f.assists = a; A.cue("ack"); }
-    if (ui.id("begin").style("btn-play").button(T("Begin"))) run(f.assists);
+    if (ui.id("begin").style(__l10nStyle("btn-play")).button(T("Begin"))) run(f.assists);
     buttonRows("setup-back", [{ id: "back", label: back(), cls: "btn-subtle", run: () => A.showModeSelect() }], w);
   }, { label: stageTitle(stage) });
 }
@@ -251,7 +263,7 @@ function journeyScreen(): void {
         const rec = d.journey[st.id];
         const face = (st.index + 1) + (st.mastery ? " ◆" : "") + (rec ? (rec.won ? " ✓" : " ·" + Math.round(rec.score)) : "");
         const name = T("{name} — difficulty {d}", { name: T(st.name), d: st.difficulty });
-        const hit = ui.id(`stage-${st.id}`).style(rec && rec.won ? "btn-stage-won" : "btn-stage", { width: cell, height: Math.max(56, cell) }).button(name, {
+        const hit = ui.id(`stage-${st.id}`).style(__l10nStyle(rec && rec.won ? "btn-stage-won" : "btn-stage"), __l10nStyle({ width: cell, height: Math.max(56, cell) })).button(name, {
           tooltip: name,
           content: () => ui.label(face, { size: 15.2 }),
         });
@@ -328,7 +340,7 @@ function settingsBlock(w: number): void {
   toggle(T("Hold to confirm"), "holdToConfirm");
   toggle(T("Hints"), "hints");
   para(T("Sound volumes, graphics quality, frame rate, controls, language, larger text, high contrast and reduced motion are in the StarHermit Options (F1)."), w, "small");
-  buttonRows("set-sh", [{ id: "sh-options", label: T("StarHermit Options"), run: () => openMenu() }], w);
+  buttonRows("set-sh", [{ id: "sh-options", label: T("StarHermit Options"), run: () => __l10nOptions() }], w);
 }
 function settingsScreen(): void {
   screen("settings", (w) => {
@@ -429,15 +441,15 @@ function topBar(): void {
   const r = ui.place("hud-top", "top-start", () => {
     const inner = VW - 24;
     ui.row("hud-row", () => {
-      if (ui.id("pause").style("btn-top").button(T("⏸ Pause"))) A.pauseGame();
+      if (ui.id("pause").style(__l10nStyle("btn-top")).button(T("⏸ Pause"))) A.pauseGame();
       // ⌖ draws as a missing glyph on the 1.24.0 web runtime: the map emoji instead.
-      if (ui.id("map").style("btn-top").button(T("⌖ Map").replace("⌖", "🗺️"), { selected: app.overview, tooltip: T("Toggle station overview / room view") })) A.toggleMap();
+      if (ui.id("map").style(__l10nStyle("btn-top")).button(T("⌖ Map").replace("⌖", "🗺️"), { selected: app.overview, tooltip: T("Toggle station overview / room view") })) A.toggleMap();
       const drawers = !wide() && !phone();
       const cw = Math.max(40, inner - 260 - (drawers ? 260 : 0));
       ui.column("cap", () => { if (app.caption) para(app.caption.text, cw, "caption"); }, { width: cw, style: "topbar-caption" });
       if (drawers) {
-        if (ui.id("drawer-left").style("btn-top").button(T("☰ Log"), { selected: app.drawer === "left" })) app.drawer = app.drawer === "left" ? null : "left";
-        if (ui.id("drawer-right").style("btn-top").button(T("Actions ▸"), { selected: app.drawer === "right" })) app.drawer = app.drawer === "right" ? null : "right";
+        if (ui.id("drawer-left").style(__l10nStyle("btn-top")).button(T("☰ Log"), { selected: app.drawer === "left" })) app.drawer = app.drawer === "left" ? null : "left";
+        if (ui.id("drawer-right").style(__l10nStyle("btn-top")).button(T("Actions ▸"), { selected: app.drawer === "right" })) app.drawer = app.drawer === "right" ? null : "right";
       }
     }, { spacing: 14, align: "center", width: inner });
   }, { padding: short ? { top: 4, start: 12, end: 12 } : { top: 8, start: 12, end: 12 }, width: VW });
@@ -491,7 +503,7 @@ function gameHud(): void {
 function pauseDialog(): void {
   card("pause", T("Paused"), 520, (w) => {
     title(T("Paused"), w);
-    if (ui.id("resume").style("btn-play").button(T("▶ Resume"))) A.resumeGame();
+    if (ui.id("resume").style(__l10nStyle("btn-play")).button(T("▶ Resume"))) A.resumeGame();
     settingsBlock(w);
     buttonRows("pause-foot", [
       { id: "p-help", label: T("Help"), run: () => A.showHelp("pause") },
@@ -520,10 +532,10 @@ function resultsDialog(): void {
     ui.grid(T("Score breakdown"), () => {
       for (const [k, v] of Object.entries(result.score.parts as Record<string, number>)) {
         lbl(scorePartName(k), "text");
-        ui.style("text", { text: { align: "end" } }).label(String(Math.round(Math.max(0, v))));
+        ui.style(__l10nStyle("text"), __l10nStyle({ text: { align: "end" } })).label(String(Math.round(Math.max(0, v))));
       }
-      ui.gridRow("score-row").style("total").label(T("Total"));
-      ui.style("total", { text: { align: "end" } }).label(String(Math.round(Math.max(0, result.score.total))));
+      ui.gridRow("score-row").style(__l10nStyle("total")).label(T("Total"));
+      ui.style(__l10nStyle("total"), __l10nStyle({ text: { align: "end" } })).label(String(Math.round(Math.max(0, result.score.total))));
     }, { columns: [{ fr: 1 }, { width: "auto", align: "end" }], gap: { row: 8, column: 14 }, width: tw, rowStyle: "score-row" });
     if (result.seats) {
       lbl(T("The council"), "muted");

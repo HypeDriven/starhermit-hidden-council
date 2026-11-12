@@ -1,3 +1,4 @@
+import { withLanguageRender as __l10nRender } from "./l10n/menu.ts";
 // Hidden Council on the StarHermit engine: the entry module (starhermit.txt
 // engine.entry), played natively by the StarHermit client and in browsers by
 // the engine's web runtime. The rules, AI, content, session driver and save
@@ -102,8 +103,12 @@ onUpdate((dt) => {
   applyLook();
   audio.update();
 });
-onRender(() => {
+onRender(__l10nRender(() => {
   drawScreens();
   const f = frame();
   render.update(frameDt, f.width, f.height, hidden || app.phase === "paused");
-});
+}));
+
+// localization-runtime:menu
+import { installLanguageMenu as __installLanguageMenu } from "./l10n/menu.ts";
+__installLanguageMenu(false);
