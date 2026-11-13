@@ -9,33 +9,33 @@
       "pinnedCommitSha": null,
       "deployedCommitSha": null,
       "deployError": null,
-      "deployedAt": "2026-11-12T08:15:01.649524+00:00",
+      "deployedAt": "2026-11-13T08:37:53.889436+00:00",
       "externalLaunchUrl": null,
-      "engineVersion": "1.38.0",
+      "engineVersion": "1.39.0",
       "deployWarning": null
     }
   },
-  "publishedAt": "2026-11-12T08:15:06.791Z",
-  "sourceCommit": "9389d875689428cd8800e928789e0c842d10b98b",
-  "bytesReceived": 1988987,
-  "archiveSha256": "438352d71092d60c3ee93d36457adab8b4ef62f11788156f607b4a7eda159e4a",
-  "indexSha256": "83727486a168af28d3ea4908b77db8ff63ed6d487fa4d91bad80b23e75c5bcd7",
+  "publishedAt": "2026-11-13T08:37:58.334Z",
+  "sourceCommit": "d15c6a4554d1a4de0070b6b8d36fa6d6615d388e",
+  "bytesReceived": 1990017,
+  "archiveSha256": "8a05ffe06d58ed16ba7a77bd49f49e6777b05f390b705425fbcb9c4867f97a83",
+  "indexSha256": "89c92e38f91139c3a21e02bb761d3a6e1be302ed69fd7899cbd78b9b029647c1",
   "result": {
     "clientPublished": true,
     "serverImageLoaded": false,
     "imageDigest": null,
-    "bytesReceived": 1988987,
+    "bytesReceived": 1990017,
     "mode": "replace",
     "filesRemoved": 0,
-    "engineVersion": "1.38.0",
+    "engineVersion": "1.39.0",
     "deployWarning": null
   },
   "liveVerification": {
-    "at": "2026-11-12T08:15:06.791Z",
+    "at": "2026-11-13T08:37:58.334Z",
     "files": [
       {
         "file": "starhermit-files.json",
-        "sha256": "83727486a168af28d3ea4908b77db8ff63ed6d487fa4d91bad80b23e75c5bcd7",
+        "sha256": "89c92e38f91139c3a21e02bb761d3a6e1be302ed69fd7899cbd78b9b029647c1",
         "status": 200
       },
       {
@@ -85,12 +85,12 @@
       },
       {
         "file": "index.html",
-        "sha256": "c14b2bc5f3daef85d37eed2933ef6d94b94fcd567381b91c540245d381e252dc",
+        "sha256": "de77e0127d16cb1fcf11063db7a3c8640c2bfac680f95c824c7802165a45ad96",
         "status": 200
       },
       {
         "file": "starhermit.txt",
-        "sha256": "097d1beeb3156d7b982d202f8f560de0d75b1bd2f3e1ebc83519ef6817b38b88",
+        "sha256": "a0b6a3387a5bef70ddfc00d04264b6afa7a885063d768a5ce426487e65b74e7b",
         "status": 200
       }
     ]
