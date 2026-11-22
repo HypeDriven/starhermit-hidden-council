@@ -12,7 +12,7 @@
     "metadataSource": "starhermit.txt",
     "createdAt": "2026-09-01T07:01:01.579799+00:00",
     "coverArtSource": "manifest",
-    "coverArtUpdatedAt": "2026-11-18T17:51:37.633667+00:00",
+    "coverArtUpdatedAt": "2026-11-22T14:20:00.749244+00:00",
     "submittedByUserId": "2712e04e-461b-4d23-81ae-e40b429128a8",
     "submittedByUsername": "starhermit",
     "hosting": {
@@ -22,9 +22,9 @@
       "pinnedCommitSha": null,
       "deployedCommitSha": null,
       "deployError": null,
-      "deployedAt": "2026-11-18T17:51:37.609974+00:00",
+      "deployedAt": "2026-11-22T14:20:00.725838+00:00",
       "externalLaunchUrl": null,
-      "engineVersion": "1.44.1",
+      "engineVersion": "1.47.0",
       "deployWarning": null
     },
     "description": "Complete station tasks, investigate suspicious behavior, and uncover saboteurs in a clockwork social-deduction game.",
@@ -36,19 +36,19 @@
     "links": [],
     "isDisabled": false
   },
-  "publishedAt": "2026-11-18T17:51:37.621Z",
-  "sourceCommit": "dbbe4ec914872f77356e987da991b7768f418c8e",
-  "bytesReceived": 3594076,
-  "archiveSha256": "10fedd50431a413d968ace196212921dcaef5c1e13a5c43686c12744e706073a",
+  "publishedAt": "2026-11-22T14:20:01.198Z",
+  "sourceCommit": "6ecdd29c10c62a73f90d3e46b0ed038bb943f45e",
+  "bytesReceived": 3594109,
+  "archiveSha256": "82e5d27ce82d886bd16bdfb32167bb1075877862b2a17ebbae9edbff23c53df3",
   "indexSha256": "89c92e38f91139c3a21e02bb761d3a6e1be302ed69fd7899cbd78b9b029647c1",
   "result": {
     "clientPublished": true,
     "serverImageLoaded": false,
     "imageDigest": null,
-    "bytesReceived": 3594076,
+    "bytesReceived": 3594109,
     "mode": "replace",
     "filesRemoved": 0,
-    "engineVersion": "1.44.1",
+    "engineVersion": "1.47.0",
     "deployWarning": null
   },
   "liveVerification": {
