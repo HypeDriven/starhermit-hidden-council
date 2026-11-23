@@ -1,3 +1,4 @@
+import { showCursor } from "./cursor.ts";
 import { withLanguageRender as __l10nRender } from "./l10n/menu.ts";
 // Hidden Council on the StarHermit engine: the entry module (starhermit.txt
 // engine.entry), played natively by the StarHermit client and in browsers by
@@ -24,6 +25,7 @@ import { app } from "./app.ts";
 const STEP_MS = 1000 / 60;
 
 onStart(() => {
+  showCursor();
   setFixedRate(60);
   initStyles();
   platform.initPlatform();
