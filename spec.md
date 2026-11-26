@@ -18,7 +18,7 @@ station's tasks, and work out which of you is winding the machine backwards.
 | Players | 1 human seat + 3–11 automata solo; up to 12 seats in hosted rooms |
 | Session length | ~2–8 minutes (par is 30–100 ticks depending on stage) |
 | Platforms | A StarHermit engine script game: natively in the StarHermit client, in browsers by the engine's web runtime; desktop and phones, portrait and landscape |
-| Engine | StarHermit engine 1.50.0 (`engine.version=1.50.0`, `engine.minor=50`, capabilities `platform,storage,clipboard`) |
+| Engine | StarHermit engine 1.51.0 (`engine.version=1.51.0`, `engine.minor=51`, capabilities `platform,storage,clipboard`) |
 | Rendering | `starhermit:scene` procedural station (three.js-like) under a `starhermit:ui` immediate-mode interface; post effects are the renderer's (AO, bloom, grade, anti-aliasing) |
 | Build | None: the engine imports the TypeScript entry (`native/main.ts`) and the shared ES modules in `src/` directly; `npm run package` writes the web loader `index.html` and `starhermit-files.json` |
 
@@ -460,7 +460,7 @@ override and preferred-language lookup are the runtime's now.
 
 `starhermit.txt`: `name`, `description`, `owner`, `server=server.js`, `version=1.1.0`,
 `cover=cover.jpg`, `launch=index.html`, `engine.api=1`, `engine.entry=native/main.ts`,
-`engine.version=1.50.0`, `engine.minor=50`, `engine.capabilities=platform,storage,clipboard`, the
+`engine.version=1.51.0`, `engine.minor=51`, `engine.capabilities=platform,storage,clipboard`, the
 eight `control.*` actions with `engine.gamepad.*` defaults and two Options groups.
 
 * *Player* — signed in (the StarHermit client's player, or the page's launch in browsers) or a
@@ -619,16 +619,16 @@ The string tables include complete regional variants for `fr-BE`, `de-BE`, `en-S
 
 <!-- regional-localization:end -->
 
-## Engine 1.50.0
+## Engine 1.51.0
 
-Browser play uses the StarHermit 1.50.0 web runtime on WebGPU, or WebGL 2 where WebGPU is missing. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
+Browser play uses the StarHermit 1.51.0 web runtime on WebGPU, or WebGL 2 where WebGPU is missing. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
 
 The help screen replays through retained native UI while its contents, options, layout and key bindings are unchanged.
 
 Browser rendering uses the engine's asynchronous pipeline creation so newly encountered materials do not stall the page. Native play retains the engine's synchronous pipeline behavior.
 
-**Frame rate (host API 1.49 `setTargetFps`).** The title (the station is not drawn behind the menus, only the plain backdrop) and, under a finger (`primaryPointer() === "coarse"`), the phone graphics levels (`levelIndex` ≤ 3) cap the game at 30 frames a second, where steady 33 ms frames replace uneven ones; elsewhere there is no game cap. The rules tick on the fixed update, so play is unchanged. The engine sets the cap aside while its menus are open, and the player's Frame rate limit still applies.
+**Frame rate (host API 1.51 `setTargetFps`).** The title (the station is not drawn behind the menus, only the plain backdrop) and, under a finger (`primaryPointer() === "coarse"`), the phone graphics levels (`levelIndex` ≤ 3) cap the game at 30 frames a second, where steady 33 ms frames replace uneven ones; elsewhere there is no game cap. The rules tick on the fixed update, so play is unchanged. The engine sets the cap aside while its menus are open, and the player's Frame rate limit still applies.
 
-**Still scenery (host API 1.49).** The station's deck, room pads, brass rims, lamp posts, bulbs and cages, corridors and pipes are `movable = false`, so the renderer caches them in shadow maps from the first frame and the scene's sync skips their transforms; a theme or budget change builds new meshes. The spinning gears, the pawns, the markers and the motes stay movable.
+**Still scenery (host API 1.51).** The station's deck, room pads, brass rims, lamp posts, bulbs and cages, corridors and pipes are `movable = false`, so the renderer caches them in shadow maps from the first frame and the scene's sync skips their transforms; a theme or budget change builds new meshes. The spinning gears, the pawns, the markers and the motes stay movable.
 
 Higher graphics tiers use native per-object motion blur for moving pieces and effects. Camera motion stays sharp, lower tiers omit the effect, and the runtime's Motion blur and Reduce motion preferences remain authoritative.
