@@ -372,6 +372,10 @@ function buildEnvironment(): void {
     pipe.position.set(0, 0.3 + i * 0.28, -4.2 - (i % 2) * 0.3);
     group.add(pipe);
   }
+  // Still scenery (host API 1.49): the deck, pads, rims, lamp posts, corridors and pipes never move
+  // once built (a rebuild makes new meshes), so they sit in the cached shadow layers and the sync
+  // skips them. The gears spin and stay movable.
+  for (const o of group.children) if (!gears.includes(o as Mesh)) o.movable = false;
   group.visible = active;
   envGroup = group;
   scene.add(group);

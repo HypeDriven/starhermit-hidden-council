@@ -8,8 +8,8 @@ import { withLanguageRender as __l10nRender } from "./l10n/menu.ts";
 // server.js (src/hosted.js); the screens and HUD are starhermit:ui
 // (screens.ts), the station starhermit:scene (render.ts), the controller
 // app.ts, saves and the platform platform.ts.
-import { frame, levelSettings, onFixedUpdate, onPreferencesChange, onQuit, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate } from "starhermit:engine";
-import { isDown, onAction, onGesture } from "starhermit:input";
+import { frame, levelSettings, onFixedUpdate, onPreferencesChange, onQuit, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate, setTargetFps } from "starhermit:engine";
+import { isDown, onAction, onGesture, primaryPointer } from "starhermit:input";
 import { onSessionEnded } from "starhermit:platform";
 import * as ui from "starhermit:ui";
 import { sh } from "./i18n.ts";
@@ -99,10 +99,23 @@ onFixedUpdate(() => {
   if (hidden) return;
   A.tick(STEP_MS);
 });
+/** The game's frame cap (host API 1.49 setTargetFps, set only on a change): 30 on the title (the
+ * station is not drawn behind the menus, only the plain backdrop) and on phone levels
+ * (levelIndex <= 3) under a finger, where steady 33 ms frames beat 33/50 ms jitter; none
+ * otherwise. The engine sets it aside while its menus are open, and the player's frame-rate limit
+ * still applies. */
+let frameCap = -1;
+function capFrames(): void {
+  const cap = app.screen === "title" || (frame().levelIndex <= 3 && primaryPointer() === "coarse") ? 30 : 0;
+  if (cap === frameCap) return;
+  frameCap = cap;
+  setTargetFps(cap || null);
+}
 let frameDt = 0;
 onUpdate((dt) => {
   frameDt = dt;
   applyLook();
+  capFrames();
   audio.update();
 });
 onRender(__l10nRender(() => {
