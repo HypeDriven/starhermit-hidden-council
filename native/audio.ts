@@ -48,7 +48,6 @@ export function loadSfx(): void {
   for (const name of new Set(Object.values(SAMPLES).flat())) {
     loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); }, (e: unknown) => console.warn(`sfx ${name}: ${String(e)}`));
   }
-  Promise.all([renderBed(), renderPad()]).then(([b, p]) => { beds = { bed: b, pad: p }; }, (e: unknown) => console.warn(`audio beds: ${String(e)}`));
 }
 
 /** Plays a cue (a variant chosen from the seed, as the browser build did) and shows its caption. */
@@ -123,7 +122,17 @@ export function setSuspended(on: boolean): void {
 }
 
 /** Each frame: the beds' loops start once they are rendered and the mixer runs. */
+let __bedsStarted = false;
+function startBeds(): void {
+  if (__bedsStarted) return;
+  __bedsStarted = true;
+  void (async () => {
+    Promise.all([renderBed(), renderPad()]).then(([b, p]) => { beds = { bed: b, pad: p }; }, (e: unknown) => console.warn(`audio beds: ${String(e)}`));
+  })();
+}
+
 export function update(): void {
+  startBeds();
   if (context.state !== "running" || suspended || bedsFailed || !beds) return;
   try {
     if (!bed) { bed = playClip(beds.bed, { bus: "music", gain: AMBIENCE, loop: true }); return; }
